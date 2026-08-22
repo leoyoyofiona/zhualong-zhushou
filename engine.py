@@ -252,11 +252,16 @@ def plan_pool(matches, pool, alloc, pool_label, opt_labels, mode="normal"):
             for k, p in probs.items():
                 o = odds[k]
                 tags, edge = tag_for(p, o, k == best_key)
+                # 防平：平局处于合理区间且不是首选时，推荐为"防平"对冲（confident 模式阈值更严）
+                p_min = 0.26 if mode == "confident" else 0.24
+                o_min = 3.0 if mode == "confident" else 2.8
+                if k == "d" and k != best_key and p_min <= p <= 0.45 and o >= o_min:
+                    tags.append("防平")
                 if mode == "confident":
-                    is_rec = (k == best_key) and p >= 0.50
+                    is_rec = ((k == best_key) and p >= 0.50) or "防平" in tags
                 else:
-                    is_rec = k == best_key or "价值" in tags
-                if k == best_key or "价值" in tags or "稳胆" in tags or "冷门" in tags:
+                    is_rec = k == best_key or "价值" in tags or "防平" in tags
+                if k == best_key or "价值" in tags or "稳胆" in tags or "冷门" in tags or "防平" in tags:
                     picks.append({
                         **brief, "pool": pool, "option": opt_labels.get(k, k),
                         "odds": o, "prob": round(p, 3), "edge": round(edge, 3),
@@ -278,15 +283,22 @@ def plan_pool(matches, pool, alloc, pool_label, opt_labels, mode="normal"):
             if not probs:
                 continue
             ordered = sorted(probs.items(), key=lambda x: -x[1])
-            for label, p in ordered[:3]:
+            for idx, (label, p) in enumerate(ordered[:3]):
                 o = dict(items)[label]
                 tags, edge = tag_for(p, o, label == ordered[0][0])
-                is_rec = label == ordered[0][0] if mode == "confident" else (label == ordered[0][0] or "价值" in tags)
-                picks.append({
-                    **brief, "pool": pool, "option": opt_labels.get(label, label),
-                    "odds": o, "prob": round(p, 3), "edge": round(edge, 3),
-                    "tags": tags, "stake": 0, "recommended": is_rec,
-                })
+                # 次选：第二名与第一名概率接近时，推荐为"次选"（双选分散）
+                ratio = 0.60 if mode == "confident" else 0.55
+                if idx == 1 and p >= ratio * ordered[0][1]:
+                    tags.append("次选")
+                is_rec = label == ordered[0][0] if mode == "confident" else (label == ordered[0][0] or "价值" in tags or "次选" in tags)
+                if mode == "confident" and "次选" in tags:
+                    is_rec = True
+                if is_rec or "次选" in tags:
+                    picks.append({
+                        **brief, "pool": pool, "option": opt_labels.get(label, label),
+                        "odds": o, "prob": round(p, 3), "edge": round(edge, 3),
+                        "tags": tags, "stake": 0, "recommended": is_rec,
+                    })
             if pool == "ttg":
                 p_big = sum(probs.get(str(g), 0) for g in (3, 4, 5, 6, "7+"))
                 notes.append({"match": brief["id"],
@@ -300,9 +312,25 @@ def plan_pool(matches, pool, alloc, pool_label, opt_labels, mode="normal"):
     return {"pool": pool, "label": pool_label, "picks": picks, "notes": notes}
 
 
-def _apply_stakes(picks, alloc, min_stake=2.0):
-    """给推荐注分配仓位（1/4 凯利，下限 2 元），总额不超过 alloc。"""
+def _apply_stakes(picks, alloc, min_stake=2.0, max_per_type=None):
+    """给推荐注分配仓位（1/4 凯利，下限 2 元），总额不超过 alloc。
+
+    max_per_type: 如 {"稳胆":3,"首选":3,"防平":2,"价值":1} —— 每类标签最多下几注，
+    保证方案有平衡（不是清一色最低赔率的热门）。
+    """
     recs = [p for p in picks if p.get("recommended")]
+    if max_per_type:
+        chosen = []
+        # 下注优先级：稳胆 → 防平 → 首选 → 次选 → 价值（保证方案里有平局对冲/分散选项）
+        for tag in ("稳胆", "防平", "首选", "次选", "价值"):
+            group = [p for p in recs if tag in p["tags"]]
+            group.sort(key=lambda p: -p["prob"])
+            chosen.extend(group[: max_per_type.get(tag, 99)])
+        seen, recs = set(), []
+        for p in chosen:
+            if id(p) not in seen:
+                seen.add(id(p))
+                recs.append(p)
     budget = alloc
     for p in recs:
         if budget < min_stake:
@@ -331,7 +359,13 @@ def plan_jczq_singles(data, weights, budget, mode="normal"):
         plan = plan_pool(matches, pool, alloc, label, opt_labels, mode=mode)
         # 胜平负预留 6 元给串关（2串1/3串1），其余玩法全额给单关
         combos_reserve = 6.0 if pool == "had" else 0.0
-        plan["spent"] = _apply_stakes(plan["picks"], max(alloc - combos_reserve, 0.0))
+        singles_budget = max(alloc - combos_reserve, 0.0)
+        # 每类推荐限注数，保证方案多样：稳胆/首选为主，防平/次选/价值打辅助
+        if pool == "had":
+            cap = {"稳胆": 2, "防平": 2, "首选": 2, "价值": 1}
+        else:
+            cap = {"首选": 2, "次选": 1, "价值": 1}
+        plan["spent"] = _apply_stakes(plan["picks"], singles_budget, max_per_type=cap)
         # 串关建议（2串1/3串1，与体彩"过关"玩法一致）：从中赔首选/稳胆里挑组合
         locks = [p for p in plan["picks"] if (("稳胆" in p["tags"]) or ("首选" in p["tags"]))
                  and 1.4 <= p["odds"] <= 2.8 and p["prob"] >= 0.45]
