@@ -10,14 +10,45 @@
 
 <div class="sticky-head">
 <header class="topbar">
-  <div class="brand"><span class="logo">LEODENG</span><span class="brand-text">抓龙助手</span><span class="brand-sub">祝鸟抓大龙！每抓必中！</span></div>
+  <div class="brand">
+    <div class="dd" id="dd-works">
+      <button class="logo dd-trigger" id="btn-works" title="LEO 的作品">LEODENG</button>
+      <div class="dd-panel dd-works" id="dd-works-panel"><!-- 作品卡片由 JS 渲染 --></div>
+    </div>
+    <span class="brand-text">抓龙助手</span><span class="brand-sub">祝鸟抓大龙！每抓必中！</span>
+  </div>
   <div class="status">
     <span class="src-badge" id="src-jczq" title="">竞彩源: --</span>
     <span class="src-badge" id="src-zucai" title="">传统源: --</span>
     <span class="updated" id="updated-at">--</span>
-    <button id="btn-refresh" class="btn">⟳ 刷新</button>
-    <button id="btn-settings" class="btn">⚙ 设置</button>
-    <button id="btn-history" class="btn">📋 历史</button>
+    <div class="dd">
+      <button id="btn-refresh" class="btn dd-trigger">⟳ 刷新</button>
+      <div class="dd-panel dd-menu">
+        <div class="dd-item" data-action="refresh">⚡ 立即刷新数据</div>
+        <div class="dd-title">数据源</div>
+        <div class="dd-item" data-action="source-auto">🔄 自动（推荐）</div>
+        <div class="dd-item" data-action="source-official">🏛 仅官方接口</div>
+        <div class="dd-item" data-action="source-fallback">🛡 备用源</div>
+        <div class="dd-item" data-action="source-demo">🧪 演示数据</div>
+      </div>
+    </div>
+    <div class="dd">
+      <button id="btn-settings" class="btn dd-trigger">⚙ 设置</button>
+      <div class="dd-panel dd-menu">
+        <div class="dd-item" data-action="open-settings">⚙ 打开设置面板</div>
+        <div class="dd-title">快捷设置</div>
+        <div class="dd-item" data-action="open-settings">💰 预算与权重</div>
+        <div class="dd-item" data-action="open-settings">🗂 数据源</div>
+        <div class="dd-item" data-action="open-settings">🤖 大模型分析</div>
+      </div>
+    </div>
+    <div class="dd">
+      <button id="btn-history" class="btn dd-trigger">📋 历史</button>
+      <div class="dd-panel dd-menu">
+        <div class="dd-item" data-action="open-history">📋 查看历史记录</div>
+        <div class="dd-item" data-action="clear-history">🗑 清空历史记录</div>
+      </div>
+    </div>
   </div>
 </header>
 

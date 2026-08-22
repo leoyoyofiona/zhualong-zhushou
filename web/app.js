@@ -30,6 +30,63 @@ const JCZQ_POOLS = ["had", "ttg", "crs", "hafu"];
 const ZUCAI_KEYS = { 85: "zucai14", 86: "ren9", 87: "ban6", 88: "goal4" };
 const ZUCAI_ORDER = ["zucai14", "ren9", "ban6", "goal4"];
 
+/* ---------------- LEO 的作品（GitHub 开源 + Render 线上） ---------------- */
+const GH = "https://github.com/leoyoyofiona/";
+const WORKS = [
+  { name: "世界杯", emoji: "🏆", desc: "2026 世界杯预测 Web 应用", gh: "worldcup-prediction", render: "https://worldcup-prediction-peur.onrender.com" },
+  { name: "足彩", emoji: "🎯", desc: "足彩数据分析与投注辅助", gh: "leo-football-lottery", render: "https://leo-football-lottery.onrender.com" },
+  { name: "大乐透", emoji: "🎰", desc: "大乐透走势分析与预测面板", gh: "super-lotto-trend-model", render: "https://super-lotto-trend-model.onrender.com" },
+  { name: "福彩", emoji: "🧧", desc: "福彩数据分析工具", gh: "leo-welfare-lottery", render: "https://leo-welfare-lottery.onrender.com" },
+  { name: "周星弛", emoji: "🎬", desc: "周星驰先生作品欣赏：时间线·人物关系·影迷档案", gh: "stephen-chow-works-mainland", render: "https://stephen-chow-works-mainland.onrender.com" },
+  { name: "抓小红书", emoji: "📕", desc: "小红书收藏整理工具", gh: "xiaohongshu-favorites", render: "" },
+  { name: "同声传译", emoji: "🗣️", desc: "中英泰同声传译工具", gh: "ZH-EN-TH-translate", render: "" },
+  { name: "三下空格翻译", emoji: "⌨️", desc: "打字三下空格即翻译", gh: "triple-space-translator", render: "" },
+  { name: "macOS快捷助手", emoji: "🍎", desc: "按住一键，弹出当前应用快捷键", gh: "LEO-MACOS-Shortcut-Assistant", render: "" },
+  { name: "yoyo学习", emoji: "🚀", desc: "yoyo 学习成长工具", gh: "yoyo-learning-boost", render: "https://yoyo-learning-boost.onrender.com" },
+  { name: "足彩分析", emoji: "📊", desc: "足彩方案助手 · 8种玩法一张面板（本工具）", gh: "zhualong-zhushou", render: "https://zhualong-assistant.onrender.com" },
+  { name: "高考志愿填报", emoji: "🎓", desc: "高考志愿填报指南针", gh: "leo-zhiyuan-compass", render: "https://leo-zhiyuan.onrender.com" },
+  { name: "今天你笑了吗？", emoji: "😄", desc: "LEO 个人网站：教学·每日文摘·幽默一刻", gh: "dengzhimin-site", render: "https://dengzhimin-site.onrender.com" },
+  { name: "浙师大约球", emoji: "🏀", desc: "浙师大教职工约球平台", gh: "zjnu-staff-football", render: "https://zjnu-staff-football.onrender.com" },
+  { name: "自动模仿手打字", emoji: "✍️", desc: "自动模仿手打字脚本", gh: "autotype", render: "" },
+  { name: "NoType", emoji: "🎙️", desc: "macOS 原生语音输入：实时听写·句子润色", gh: "NoType", render: "" },
+  { name: "Learn English Vlog", emoji: "🇬🇧", desc: "LEO 学英语 vlog 视频内容", gh: "leo-videos-2", render: "" },
+];
+
+function renderWorksMenu() {
+  const panel = $("dd-works-panel");
+  if (!panel) return;
+  const cards = WORKS.map((w, i) => {
+    const links = [`<a href="${GH}${w.gh}" target="_blank" rel="noopener" onclick="event.stopPropagation()">GitHub</a>`];
+    if (w.render) links.push(`<a href="${w.render}" target="_blank" rel="noopener" onclick="event.stopPropagation()">🌐 在线</a>`);
+    // 外层用 div 而不是 <a>：避免嵌套链接被浏览器解析破坏
+    return `<div class="work-card" data-work="${i}" style="animation-delay:${i * 45}ms">
+      <div class="work-ico">${w.emoji}</div>
+      <div class="work-name">${esc(w.name)}</div>
+      <div class="work-desc">${esc(w.desc)}</div>
+      <div class="work-links">${links.join("")}</div>
+    </div>`;
+  }).join("");
+  panel.innerHTML = `
+    <div class="works-title">🚀 LEO 的作品 · 全部开源在 GitHub，多数已上线 Render</div>
+    <div class="works-grid">${cards}</div>
+    <div class="coffee">
+      <h3>☕ 请 LEO 喝球咖啡</h3>
+      <p>喜欢哪个作品？请我喝杯咖啡，继续做更多好玩的工具 🙏</p>
+      <div class="qrs">
+        <div class="qr"><img src="qr/alipay.jpg" alt="支付宝收款码"><span>支付宝</span></div>
+        <div class="qr"><img src="qr/wechat.jpg" alt="微信收款码"><span>微信</span></div>
+      </div>
+    </div>`;
+  // 点击卡片本体 → 打开作品主链接
+  panel.addEventListener("click", (e) => {
+    const card = e.target.closest(".work-card");
+    if (!card) return;
+    if (e.target.closest("a")) return;
+    const w = WORKS[Number(card.dataset.work)];
+    if (w) window.open(w.render || GH + w.gh, "_blank");
+  });
+}
+
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const keyOf = (mid, option) => `${mid}|${option}`;
@@ -1157,7 +1214,53 @@ function saveResult(id) {
 
 /* ---------------- 事件 ---------------- */
 
+function handleDdAction(action) {
+  if (action === "refresh") {
+    refreshData();
+    toast("正在刷新数据…");
+  } else if (action.startsWith("source-")) {
+    const pref = action.slice(7);
+    const label = { auto: "自动", official: "官方接口", fallback: "备用源", demo: "演示数据" }[pref] || pref;
+    APP.sourcePref = pref;
+    api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_pref: pref }) });
+    refreshData(pref);
+    toast("正在切换到数据源：" + label);
+  } else if (action === "open-settings") {
+    openSettings();
+  } else if (action === "open-history") {
+    openHistory();
+  } else if (action === "clear-history") {
+    if (confirm("确定清空全部历史记录吗？此操作不可恢复。")) {
+      api("/api/clear-history", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })
+        .then(r => { if (r.ok) { toast("历史已清空"); if (!$("modal-history").classList.contains("hidden")) loadHistory(); } });
+    }
+  }
+}
+
 function bindEvents() {
+  renderWorksMenu();
+  // 下拉菜单：鼠标悬停由 CSS 控制(.dd:hover)；LEO作品菜单支持点击切换(触屏)
+  $("btn-works").addEventListener("click", (e) => {
+    e.stopPropagation();
+    const dd = e.target.closest(".dd");
+    const isOpen = dd.classList.contains("open");
+    document.querySelectorAll(".dd.open").forEach(d => d.classList.remove("open"));
+    if (!isOpen) dd.classList.add("open");
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".dd")) {
+      document.querySelectorAll(".dd.open").forEach(d => d.classList.remove("open"));
+    }
+  });
+  document.querySelectorAll(".dd-panel [data-action]").forEach(item => {
+    item.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const action = item.dataset.action;
+      document.querySelectorAll(".dd.open").forEach(d => d.classList.remove("open"));
+      handleDdAction(action);
+    });
+  });
   $("btn-refresh").onclick = () => refreshData();
   $("btn-apply-all").onclick = applyAllRecsConfident;
   $("btn-apply-manual").onclick = applyAllManual;

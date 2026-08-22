@@ -269,6 +269,9 @@ class Handler(BaseHTTPRequestHandler):
             db_exec("UPDATE bets SET status=?, profit=? WHERE id=?",
                     (status, profit, bid))
             self._json({"ok": True})
+        elif p == "/api/clear-history":
+            db_exec("DELETE FROM bets")
+            self._json({"ok": True, "msg": "历史已清空"})
         elif p == "/api/settings":
             cur = load_settings()
             for k in ("budget", "weights", "source_pref"):
