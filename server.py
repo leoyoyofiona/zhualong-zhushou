@@ -46,6 +46,8 @@ MIME = {
     ".js": "application/javascript; charset=utf-8",
     ".json": "application/json; charset=utf-8",
     ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
     ".svg": "image/svg+xml",
     ".ico": "image/x-icon",
 }
@@ -235,6 +237,9 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/settings":
             self._json({"ok": True, "settings": load_settings(),
                         "defaults": {"budget": 100, "weights": engine.DEFAULT_WEIGHTS}})
+        elif not p.startswith("/api/"):
+            # 其余静态资源（qr 收款码等图片、前端文件）
+            self._serve_static(p[1:] or "index.html")
         else:
             self._json({"ok": False, "error": "404"}, 404)
 
