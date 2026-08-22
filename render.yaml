@@ -6,7 +6,7 @@ services:
     name: zhualong-assistant
     runtime: python
     plan: free
-    buildCommand: ""
+    buildCommand: pip install -r requirements.txt
     startCommand: python3 server.py --host 0.0.0.0 --no-browser
     healthCheckPath: /
     envVars:
