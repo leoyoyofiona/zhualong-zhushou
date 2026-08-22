@@ -16,6 +16,7 @@ const APP = {
   passChecked: new Set(), // 过关生成器勾选的场次
   passM: 2,
   passTickets: [],  // 已加入投注单的过关票
+  slipCollapsed: false, // 投注单收起状态（手机端默认收起）
   timer: null,
 };
 
@@ -1161,6 +1162,11 @@ function bindEvents() {
   $("btn-apply-all").onclick = applyAllRecsConfident;
   $("btn-apply-manual").onclick = applyAllManual;
   $("btn-clear-slip").onclick = clearSlip;
+  $("btn-slip-toggle").onclick = () => {
+    APP.slipCollapsed = !APP.slipCollapsed;
+    $("slip-panel").classList.toggle("collapsed", APP.slipCollapsed);
+    $("btn-slip-toggle").textContent = APP.slipCollapsed ? "展开 ▴" : "收起 ▾";
+  };
   $("btn-copy-slip").onclick = copySlip;
   $("btn-png-slip").onclick = pngSlip;
   $("btn-save-slip").onclick = saveSlip;
@@ -1395,6 +1401,12 @@ async function init() {
   APP.budget = budget;
   $("budget-slider").value = Math.min(200, Math.max(50, budget));
   $("budget-num").value = budget;
+  // 手机端投注单默认收起，避免占太多屏幕
+  if (window.innerWidth < 900) {
+    APP.slipCollapsed = true;
+    $("slip-panel").classList.add("collapsed");
+    $("btn-slip-toggle").textContent = "展开 ▴";
+  }
   bindEvents();
   await loadState();
   if (APP.weights) recomputePlan();

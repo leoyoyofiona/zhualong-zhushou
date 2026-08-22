@@ -21,12 +21,16 @@
 html, body { background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
 .hidden { display: none !important; }
 
-/* 顶栏 */
+/* 顶栏 + 预算条：整体吸顶，向下滑动时三个操作按钮保持不动 */
+.sticky-head {
+  position: sticky; top: 0; z-index: 45;
+  background: rgba(255, 255, 255, .97); backdrop-filter: blur(8px);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, .08);
+}
 .topbar {
-  position: sticky; top: 0; z-index: 50;
   display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-  padding: 10px 20px; background: rgba(255,255,255,.95); backdrop-filter: blur(8px);
-  border-bottom: 1px solid var(--line); box-shadow: var(--shadow);
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
 }
 .brand { font-size: 20px; font-weight: 800; letter-spacing: .5px; color: var(--accent); display: flex; align-items: center; gap: 10px; }
 .logo {
@@ -79,7 +83,7 @@ html, body { background: var(--bg); color: var(--text); font: 14px/1.6 -apple-sy
 /* 预算条 */
 .budget-bar {
   display: flex; align-items: center; gap: 24px; flex-wrap: wrap;
-  padding: 12px 20px; background: #fff; border-bottom: 1px solid var(--line);
+  padding: 10px 20px; background: #fff; border-bottom: 1px solid var(--line);
 }
 .budget-item { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .budget-item b { color: var(--accent2); font-size: 16px; }
@@ -222,6 +226,9 @@ main { padding: 16px 20px 80px; max-width: 1600px; margin: 0 auto; }
   background: #fff; border: 1px solid var(--accent); border-radius: var(--radius);
   box-shadow: 0 12px 40px rgba(15, 23, 42, .18); z-index: 60;
 }
+.slip-panel.collapsed { max-height: none; }
+.slip-panel.collapsed .slip-body,
+.slip-panel.collapsed .slip-actions { display: none; }
 .slip-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .slip-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .slip-body { overflow: auto; padding: 10px 14px; }
@@ -283,5 +290,8 @@ main { padding: 16px 20px 80px; max-width: 1600px; margin: 0 auto; }
 
 @media (max-width: 900px) {
   .cards { grid-template-columns: 1fr; }
-  .slip-panel { width: 100%; right: 0; bottom: 0; max-height: 50vh; border-radius: 12px 12px 0 0; }
+  .slip-panel { width: 100%; right: 0; bottom: 0; max-height: 38vh; border-radius: 12px 12px 0 0; }
+  .slip-panel.collapsed { max-height: none; }
+  .sticky-head .topbar { padding: 8px 12px; }
+  .sticky-head .budget-bar { padding: 8px 12px; gap: 10px; }
 }

@@ -8,6 +8,7 @@
 </head>
 <body>
 
+<div class="sticky-head">
 <header class="topbar">
   <div class="brand"><span class="logo">LEODENG</span><span class="brand-text">抓龙助手</span><span class="brand-sub">祝鸟抓大龙！每抓必中！</span></div>
   <div class="status">
@@ -20,6 +21,25 @@
   </div>
 </header>
 
+<section class="budget-bar">
+  <div class="budget-item">
+    <label for="budget-slider">今日预算</label>
+    <input type="range" id="budget-slider" min="50" max="200" step="10" value="100">
+    <input type="number" id="budget-num" min="0" max="500" step="5" value="100">
+    <span>元</span>
+  </div>
+  <div class="budget-item usage">
+    推荐方案合计 <b id="total-spent">0</b> 元
+    <span id="budget-ok" class="ok-text"></span>
+  </div>
+  <div class="budget-item">
+    <button id="btn-apply-all" class="btn primary">✨ 一键推荐（最有把握）</button>
+    <button id="btn-apply-manual" class="btn green">✋ 一键采用全部手动</button>
+    <button id="btn-clear-slip" class="btn">清空投注单</button>
+  </div>
+</section>
+</div>
+
 <div class="disclaimer">
   <span class="d-title">⚠️ 免责声明</span>
   <span class="d-body">本工具仅供个人数据整理与娱乐参考，<b>不构成任何投注建议</b>；彩票是概率游戏，长期期望为负，中奖无法预测与保证，请理性购彩、量力而行，<b>未成年人不得购彩</b>。</span>
@@ -30,30 +50,13 @@
 <div id="banner-err" class="banner err hidden"></div>
 
 <main>
-  <section class="budget-bar">
-    <div class="budget-item">
-      <label for="budget-slider">今日预算</label>
-      <input type="range" id="budget-slider" min="50" max="200" step="10" value="100">
-      <input type="number" id="budget-num" min="0" max="500" step="5" value="100">
-      <span>元</span>
-    </div>
-    <div class="budget-item usage">
-      推荐方案合计 <b id="total-spent">0</b> 元
-      <span id="budget-ok" class="ok-text"></span>
-    </div>
-    <div class="budget-item">
-      <button id="btn-apply-all" class="btn primary">✨ 一键推荐（最有把握）</button>
-      <button id="btn-apply-manual" class="btn green">✋ 一键采用全部手动</button>
-      <button id="btn-clear-slip" class="btn">清空投注单</button>
-    </div>
-  </section>
-
   <section class="cards" id="cards"><!-- 卡片由 JS 渲染 --></section>
 </main>
 
 <aside class="slip-panel" id="slip-panel">
   <div class="slip-head">
     <b>🧾 投注单</b>
+    <button id="btn-slip-toggle" class="btn small">收起 ▾</button>
     <div class="slip-actions">
       <button id="btn-copy-slip" class="btn">复制文本</button>
       <button id="btn-png-slip" class="btn">生成截图</button>
