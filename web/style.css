@@ -246,6 +246,7 @@ main { padding: 16px 20px 80px; max-width: 1600px; margin: 0 auto; }
 .tag.冷门 { background: var(--danger); color: #fff; }
 .tag.防平 { background: #8b5cf6; color: #fff; }
 .tag.次选 { background: #0ea5e9; color: #fff; }
+.tag.博高 { background: #ea580c; color: #fff; }
 
 /* 比分网格 */
 .crs-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; }

@@ -301,14 +301,37 @@ def plan_pool(matches, pool, alloc, pool_label, opt_labels, mode="normal"):
                     })
             if pool == "ttg":
                 p_big = sum(probs.get(str(g), 0) for g in (3, 4, 5, 6, "7+"))
-                notes.append({"match": brief["id"],
-                              "text": f"3球及以上 {p_big * 100:.0f}% / 2球及以下 {(1 - p_big) * 100:.0f}%"})
+                if p_big >= 0.45:
+                    note_t = f"本场大球场：3球及以上 {p_big * 100:.0f}%（可多看高比分）"
+                elif p_big <= 0.28:
+                    note_t = f"本场小球场：2球及以下 {(1 - p_big) * 100:.0f}%（0球/1球也值得留意）"
+                else:
+                    note_t = f"常规场：3球及以上 {p_big * 100:.0f}% / 2球及以下 {(1 - p_big) * 100:.0f}%"
+                notes.append({"match": brief["id"], "text": note_t})
             elif pool == "hafu" and ordered:
                 notes.append({"match": brief["id"],
                               "text": f"首选 {ordered[0][0]}（{ordered[0][1] * 100:.0f}%）"})
             if "derived_pools" in m and pool in m["derived_pools"]:
                 notes.append({"match": brief["id"],
                               "text": "🛠 该玩法赔率为估算值（由胜平负赔率推导）"})
+            # 比分：额外给一个"博高比分"参考（高赔区里概率最高的大比分，如 2:2/3:1/3:2），
+            # 让推荐跟随每场进球预期有差异；标记后不占用投注金额（stake=0）
+            if pool == "crs":
+                o_map = dict(items)
+                top3_labels = {lb for lb, _ in ordered[:3]}
+                high = [it for it in ordered
+                        if 8.0 <= o_map[it[0]] <= 20.0
+                        and it[0] not in top3_labels
+                        and re.match(r"^\d+:\d+$", it[0])
+                        and sum(map(int, it[0].split(":"))) >= 3]
+                if high:
+                    lb2, p2 = high[0]
+                    o2 = o_map[lb2]
+                    picks.append({
+                        **brief, "pool": pool, "option": lb2,
+                        "odds": o2, "prob": round(p2, 3), "edge": round(p2 * o2 - 1, 3),
+                        "tags": ["博高"], "stake": 0, "recommended": True,
+                    })
     return {"pool": pool, "label": pool_label, "picks": picks, "notes": notes}
 
 
