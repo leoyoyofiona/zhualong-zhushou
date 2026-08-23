@@ -18,6 +18,7 @@ import time
 import urllib.parse
 import urllib.request
 import datetime as dt
+import difflib
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DEMO_FILE = os.path.join(BASE_DIR, "mock", "demo_data.json")
@@ -574,6 +575,76 @@ def fetch_zucai_okooo():
     ], "okooo"
 
 
+# ---------------- 传统足彩：500.com 半全场/进球彩 备用 ----------------
+
+Z500_BQC = "https://trade.500.com/bqc/"
+Z500_JQC = "https://trade.500.com/jqc/"
+
+
+def _parse_500_zucai_page(html: str):
+    """解析 500.com 半全场/进球彩页 -> (期号, 比赛列表)。"""
+    m = re.search(r"(\d{5})期", html)
+    issue = m.group(1) if m else ""
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S)
+    year = dt.date.today().year
+    matches = []
+    for r in rows:
+        if "td-no" not in r or "td-team" not in r:
+            continue
+        try:
+            no = re.search(r'class="td td-no">\s*(\d+)', r)
+            # 500 半全场/进球彩页：队名/联赛是锚文本而非 title
+            league_m = re.search(r'class="td td-evt">.*?>\s*([^<]+)</a>', r, re.S)
+            league = league_m.group(1).strip() if league_m else ""
+            endtime = re.search(r'class="td td-endtime"[^>]*>\s*([^<]+)', r)
+            home_m = re.search(r'class="team-l"[^>]*>\s*([^<]+)<', r, re.S)
+            away_m = re.search(r'class="team-r"[^>]*>\s*([^<]+)<', r, re.S)
+            home = home_m.group(1).strip() if home_m else ""
+            away = away_m.group(1).strip() if away_m else ""
+            if not (no and home and away and league):
+                continue
+            kickoff = ""
+            if endtime:
+                try:
+                    md = endtime.group(1).strip()[:10]
+                    kickoff = f"{year}-{md[:2]}-{md[3:5]} {md[6:]}"
+                except Exception:
+                    kickoff = endtime.group(1).strip()
+            matches.append({
+                "num": no.group(1).strip(),
+                "league": league,
+                "home": home,
+                "away": away,
+                "kickoff": kickoff,
+                "euro_odds": None,
+            })
+        except Exception:  # noqa: BLE001
+            continue
+    return issue, matches
+
+
+def fetch_zucai_500():
+    """6场半全场(87) / 4场进球(88) 备用源：500.com 真实期号与赛程。"""
+    issues, errs = [], []
+    for url, gno, gname, limit in ((Z500_BQC, 87, "6场半全场", 6), (Z500_JQC, 88, "4场进球", 4)):
+        try:
+            html = http_get(url, ua=UA_DESKTOP, encoding="gb18030")
+            issue, matches = _parse_500_zucai_page(html)
+            if not issue:
+                raise SourceError(f"{gname}: 未找到期号")
+            if len(matches) < limit:
+                raise SourceError(f"{gname}: 比赛不足（{len(matches)}<{limit}）")
+            issues.append({
+                "game_no": gno, "game_name": gname, "issue": issue,
+                "sale_end": "", "draw_time": "", "matches": matches[:limit],
+            })
+        except Exception as e:  # noqa: BLE001
+            errs.append(f"{gname}: {e}")
+    if not issues:
+        raise SourceError("500.com 半全场/进球彩失败: " + "; ".join(errs))
+    return issues, "500com"
+
+
 # ---------------- 演示数据 ----------------
 
 def load_demo():
@@ -631,6 +702,13 @@ def fetch_all(preferred: str = "auto"):
     if not zucai_done and preferred in ("auto", "fallback"):
         try:
             issues, src = fetch_zucai_okooo()
+            # 6场半全场(87)/4场进球(88)：okooo 不提供，用 500.com 真实期号与赛程补齐
+            try:
+                extra, src2 = fetch_zucai_500()
+                issues.extend(extra)
+                src = f"{src}+{src2}"
+            except Exception as e2:  # noqa: BLE001
+                src = f"{src}（87/88备用: {e2}）"
             result["zucai"]["issues"] = issues
             result["sources"]["zucai"] = {"source": src, "ok": True, "error": None}
             zucai_done = True
@@ -677,6 +755,36 @@ def fetch_all(preferred: str = "auto"):
             src["partial"] = True
             src["error"] = (src.get("error") or "") + " | 部分玩法（6场半全场/4场进球）当前源未提供，已用演示数据"
             result["sources"]["zucai"] = src
+
+    # ---- 87/88 比赛补真实欧指：按队名相似度匹配竞彩胜平负赔率或胜负彩欧指 ----
+    def _sim(a, b):
+        return difflib.SequenceMatcher(None, a or "", b or "").ratio()
+
+    def _find_odds(home, away, pool):
+        best, best_score = None, 0.0
+        for j in pool:
+            jh, ja = j.get("home"), j.get("away")
+            if not jh or not ja:
+                continue
+            s = (_sim(home, jh) + _sim(away, ja)) / 2
+            if s > best_score:
+                best_score, best = s, j
+        return best if best_score >= 0.62 else None
+
+    jczq_had = [m for m in result["jczq"]["matches"] if (m.get("odds") or {}).get("had")]
+    z85 = next((i for i in result["zucai"]["issues"] if i.get("game_no") == 85), None)
+    z85_euro = [m for m in (z85.get("matches") or []) if m.get("euro_odds")]
+    for i in result["zucai"]["issues"]:
+        if i.get("game_no") not in (87, 88):
+            continue
+        for mm in i.get("matches") or []:
+            j = _find_odds(mm.get("home"), mm.get("away"), jczq_had)
+            if j:
+                mm["euro_odds"] = j["odds"]["had"]
+                continue
+            z = _find_odds(mm.get("home"), mm.get("away"), z85_euro)
+            if z:
+                mm["euro_odds"] = z["euro_odds"]
     return result
 
 
