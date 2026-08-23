@@ -313,6 +313,8 @@ main { padding: 16px 20px 80px; max-width: 1600px; margin: 0 auto; }
 .slip-item { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 2px 0; }
 .slip-item .t { flex: 1; color: var(--dim); }
 .slip-item .t b { color: var(--text); }
+.slip-item.ticket-row .t { display: flex; flex-direction: column; gap: 2px; }
+.slip-item.ticket-row .t small { color: var(--accent); font-size: 11px; }
 .slip-item .st { width: 52px; background: #fff; border: 1px solid var(--line); color: var(--text); border-radius: 4px; padding: 1px 4px; text-align: center; }
 .slip-item .rm { color: var(--danger); cursor: pointer; border: none; background: none; font-size: 14px; }
 .slip-foot { padding: 8px 14px; border-top: 1px solid var(--line); font-size: 14px; }

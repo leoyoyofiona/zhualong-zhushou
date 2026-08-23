@@ -442,6 +442,9 @@ def plan_jczq_singles(data, weights, budget, mode="normal"):
                     "match_b": fmt_m(picks_[1]),
                     "match_c": fmt_m(picks_[2]) if mlen == 3 else None,
                     "serial": mlen, "odds": om, "prob": round(cp, 3), "stake": 2.0,
+                    "matches": [{"id": p["id"], "league": p["league"], "home": p["home"],
+                                 "away": p["away"], "option": p["option"], "odds": p["odds"]}
+                                for p in picks_],
                 })
                 added += 1
             plan["spent"] = round(plan["spent"] + added * 2.0, 2)

@@ -173,6 +173,126 @@ function prizeHtml(range) {
   return `<div class="rp-prize">💰 预计奖金${note}：<b>${fmtMoney(range.min)} ~ ${fmtMoney(range.max)} 元</b></div>`;
 }
 
+/* ---------------- 体彩票面布局（对齐体彩小程序投注单） ---------------- */
+const GAME_SHORT = { had: "胜平负", ttg: "总进球数", crs: "比分", hafu: "半全场" };
+const ZUCAI_SHORT = { zucai14: "胜负彩", ren9: "任选9场", ban6: "6场半全场", goal4: "4场进球" };
+
+function pickText(pool, option) {
+  let p = option;
+  if (pool === "hafu") p = String(option).replace(/-/g, "");
+  return p;
+}
+
+/* 生成"一张票"的结构化数据：{game, name, issue, serial, multiplier, notes, stake, rows:[{no,teams,game,pick}]} */
+function buildTicketBlocks() {
+  const blocks = [];
+  // ---- 竞彩单关 ----
+  for (const pool of JCZQ_POOLS) {
+    if (APP.cardPass[pool] && APP.cardPass[pool].mode === "parlay") continue;
+    const items = [...(APP.sel[pool] || new Map()).values()];
+    if (!items.length) continue;
+    blocks.push({
+      game: "竞彩足球", name: GAME_SHORT[pool], issue: "",
+      serial: "单关", multiplier: 1,
+      notes: items.length, stake: items.reduce((s, x) => s + (Number(x.stake) || 0), 0),
+      rows: items.map(it => ({
+        no: it.mid, teams: `${it.home} VS ${it.away}`,
+        game: GAME_SHORT[pool], pick: `${pickText(pool, it.option)}@${fmt(it.odds)}`,
+      })),
+    });
+  }
+  // ---- 竞彩串关（2串1/3串1 建议） ----
+  for (const pool of JCZQ_POOLS) {
+    const cs = APP.combos[pool] || [];
+    if (!cs.length) continue;
+    const serials = [...new Set(cs.map(c => c.serial || 2))].map(s => `${s}×1`).join("/");
+    const rows = [], seen = new Set();
+    for (const c of cs) {
+      for (const m of c.matches || []) {
+        const k = m.id + m.option;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        rows.push({ no: m.id, teams: `${m.home} VS ${m.away}`, game: GAME_SHORT[pool], pick: `${pickText(pool, m.option)}@${fmt(m.odds)}` });
+      }
+    }
+    blocks.push({
+      game: "竞彩足球", name: GAME_SHORT[pool], issue: "",
+      serial: serials, multiplier: 1,
+      notes: cs.length, stake: cs.reduce((s, c) => s + (Number(c.stake) || 0), 0),
+      rows,
+    });
+  }
+  // ---- 卡片过关票 ----
+  for (const pool of JCZQ_POOLS) {
+    const cfg = APP.cardPass[pool];
+    if (!cfg || cfg.mode !== "parlay") continue;
+    const pc = parlayCompute(pool);
+    if (!pc || pc.notes <= 0) continue;
+    blocks.push({
+      game: "竞彩足球", name: GAME_SHORT[pool], issue: "",
+      serial: `${pc.M}×1`, multiplier: 1,
+      notes: pc.notes, stake: pc.stake,
+      rows: pc.matches.map(e => ({
+        no: e.mid, teams: `${e.home} VS ${e.away}`,
+        game: GAME_SHORT[pool], pick: e.options.map(o => pickText(pool, o.option)).join("/"),
+      })),
+    });
+  }
+  // ---- 混合过关生成器票 ----
+  for (const t of APP.passTickets) {
+    blocks.push({
+      game: "竞彩足球", name: "混合过关", issue: "",
+      serial: `${t.M}×1`, multiplier: 1,
+      notes: t.notes, stake: t.stake,
+      rows: t.matches.map(e => ({
+        no: e.mid, teams: `${e.home} VS ${e.away}`,
+        game: "", pick: e.options.join("/"),
+      })),
+    });
+  }
+  // ---- 传统足彩 ----
+  for (const pool of ZUCAI_ORDER) {
+    const issue = zucaiIssue(pool);
+    const sel = APP.zsel[pool];
+    if (!issue || !sel) continue;
+    const rows = Object.values(sel.rows || {}).filter(r => (r.options || []).length);
+    if (!rows.length) continue;
+    let notes = 1;
+    for (const r of rows) notes *= r.options.length;
+    const rowList = [];
+    if (pool === "goal4") {
+      const byNum = {};
+      for (const [k, r] of Object.entries(sel.rows)) {
+        if (!(r.options || []).length) continue;
+        const [num, side] = k.split("-");
+        byNum[num] = byNum[num] || {};
+        byNum[num][side] = r.options.join("/");
+      }
+      for (const m of issue.matches) {
+        const s = byNum[m.num];
+        if (!s) continue;
+        const pick = `${s["主"] ? "主" + s["主"] : ""} ${s["客"] ? "客" + s["客"] : ""}`.trim();
+        rowList.push({ no: `第${m.num}场`, teams: `${m.home} VS ${m.away}`, game: "4场进球", pick });
+      }
+    } else {
+      for (const m of issue.matches) {
+        const r = sel.rows[m.num];
+        if (!r || !(r.options || []).length) continue;
+        rowList.push({
+          no: `第${m.num}场`, teams: `${m.home} VS ${m.away}`,
+          game: "", pick: r.options.map(o => pool === "ban6" ? pickText("hafu", o) : o).join("/"),
+        });
+      }
+    }
+    blocks.push({
+      game: ZUCAI_SHORT[pool], name: POOL_TITLE[pool], issue: issue.issue,
+      serial: "复式", multiplier: 1,
+      notes, stake: notes * 2, rows: rowList,
+    });
+  }
+  return blocks;
+}
+
 /* ---------------- 数据加载 ---------------- */
 
 async function api(path, opts = {}) {
@@ -949,93 +1069,86 @@ function renderSlip() {
   const groupsHtml = groups.length ? groups.map(g => {
     let rows = "";
     let prize = null;
+    let title = esc(g.title);
     if (g.items) {
-      rows = g.items.map(it => `<div class="slip-item" data-slip="${g.pool}" data-key="${esc(keyOf(it.mid, it.option))}">
-        <span class="t">${esc(it.mid)} ${esc(it.league)} ${esc(it.home)} <b style="color:var(--dim)">VS</b> ${esc(it.away)} <b>${esc(it.option)}</b>@${fmt(it.odds)}</span>
+      const stake = g.items.reduce((s, x) => s + (Number(x.stake) || 0), 0);
+      title = `${GAME_SHORT[g.pool]} · 过关：单关 倍数：1 · ${g.items.length}注 ${fmt(stake)}元`;
+      rows = g.items.map(it => `<div class="slip-item ticket-row" data-slip="${g.pool}" data-key="${esc(keyOf(it.mid, it.option))}">
+        <span class="t"><b>${esc(it.mid)}</b> ${esc(it.home)} <b style="color:var(--dim)">VS</b> ${esc(it.away)}
+          <small>${GAME_SHORT[g.pool]} ${esc(pickText(g.pool, it.option))}@${fmt(it.odds)}</small></span>
         <input class="st" type="number" min="2" step="2" value="${it.stake}" data-stake="${g.pool}|${esc(keyOf(it.mid, it.option))}">
         <button class="rm" data-rm="${g.pool}|${esc(keyOf(it.mid, it.option))}">×</button></div>`).join("");
       prize = jczqPrizeRange(g.pool);
     } else if (g.combos) {
-      rows = g.combos.map(c => {
-        const parts = [c.match_a, c.match_b];
-        if (c.match_c) parts.push(c.match_c);
-        return `<div class="slip-item" data-slip-combo="${g.pool}" data-combo-key="${esc(c.key)}">
-          <span class="t">${parts.map(esc).join(" <b>×</b> ")} = ${fmt(c.odds)}（${c.serial || 2}串1）</span>
-          <span class="st" style="width:52px;text-align:center">2元</span>
-          <button class="rm" data-rm-combo="${g.pool}|${esc(c.key)}">×</button></div>`;
-      }).join("");
+      const serials = [...new Set(g.combos.map(c => c.serial || 2))].map(s => `${s}×1`).join("/");
+      title = `${GAME_SHORT[g.pool]} · 过关：${serials} 倍数：1 · ${g.combos.length}注 ${fmt(g.combos.reduce((s, c) => s + (Number(c.stake) || 0), 0))}元`;
+      const seen = new Set();
+      rows = "";
+      for (const c of g.combos) {
+        for (const m of c.matches || []) {
+          const k = m.id + m.option;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          rows += `<div class="slip-item ticket-row"><span class="t"><b>${esc(m.id)}</b> ${esc(m.home)} <b style="color:var(--dim)">VS</b> ${esc(m.away)}
+            <small>${GAME_SHORT[g.pool]} ${esc(pickText(g.pool, m.option))}@${fmt(m.odds)}</small></span></div>`;
+        }
+      }
       prize = combosPrizeRange(g.combos);
     } else if (g.zucai) {
-      rows = `<div class="slip-item"><span class="t">${g.zucai.notes}注 × 2元 = ${fmt(g.zucai.stake)} 元（复式，点击卡片可修改选项）</span>
-        <button class="rm" data-rm-zucai="${g.pool}">×</button></div>`;
+      const issue = g.zucai.issue;
+      title = `${ZUCAI_SHORT[g.pool]} 第${issue}期 · ${POOL_TITLE[g.pool]} · 过关：复式 倍数：1 · ${g.zucai.notes}注 ${fmt(g.zucai.stake)}元`;
+      const tm = {};
+      const it = zucaiIssue(g.pool);
+      for (const m of (it ? it.matches : [])) tm[m.num] = m;
+      rows = Object.entries(g.zucai.rows || {}).filter(([, r]) => (r.options || []).length).map(([k, r]) => {
+        const m = tm[k] || {};
+        const pick = r.options.map(o => g.pool === "ban6" ? pickText("hafu", o) : o).join("/");
+        return `<div class="slip-item ticket-row"><span class="t"><b>第${k}场</b> ${esc(m.home || "")} <b style="color:var(--dim)">VS</b> ${esc(m.away || "")}
+          <small>${esc(pick)}</small></span></div>`;
+      }).join("");
       prize = zucaiPrizeRange(g.pool);
     } else if (g.passTicket) {
-      rows = `<div class="slip-item"><span class="t">${g.passTicket.notes}注 × 2元 = ${fmt(g.passTicket.stake)} 元（${g.passTicket.matches.length}场复式：${g.passTicket.matches.map(e => `${e.mid} ${e.home} VS ${e.away}【${e.options.join("/")}】`).join("；")}）</span>
-        <button class="rm" data-rm-pass="${g.passTicket.i}">×</button></div>`;
+      const t = g.passTicket;
+      title = `混合过关 · 过关：${t.M}×1 倍数：1 · ${t.notes}注 ${fmt(t.stake)}元`;
+      rows = t.matches.map(e => `<div class="slip-item ticket-row"><span class="t"><b>${esc(e.mid)}</b> ${esc(e.home)} <b style="color:var(--dim)">VS</b> ${esc(e.away)}
+        <small>${esc(e.options.join("/"))}</small></span>
+        <button class="rm" data-rm-pass="${esc(t.i)}">×</button></div>`).join("");
       prize = g.passTicket.prize || null;
     }
     const prizeLine = prize ? `<div class="slip-prize">💰 预计奖金${prize.fixed ? "" : "（估算）"}：<b>${fmtMoney(prize.min)} ~ ${fmtMoney(prize.max)} 元</b></div>` : "";
-    return `<div class="slip-group"><div class="slip-group-title">${esc(g.title)}</div>${rows}${prizeLine}</div>`;
+    return `<div class="slip-group"><div class="slip-group-title">${title}</div>${rows}${prizeLine}</div>`;
   }).join("") : `<div class="slip-empty">还没有选择任何投注。<br>点卡片上的赔率按钮，或点"一键推荐"。</div>`;
 
   body.innerHTML = groupsHtml + passGeneratorHtml();
 
   $("slip-total").textContent = fmt(total);
+  $("slip-tickets").textContent = buildTicketBlocks().length;
   const warn = $("slip-warn");
   if (total > APP.budget) { warn.textContent = `⚠ 超出预算 ${fmt(total - APP.budget)} 元`; warn.className = "over"; }
   else { warn.textContent = `≤ 预算 ${APP.budget} 元`; warn.className = "ok"; }
 }
 
 function slipText() {
+  const blocks = buildTicketBlocks();
   const lines = [];
   lines.push(`【抓龙助手 · ${APP.data.generated_at.slice(0, 10)}】`);
-  const today = APP.data.generated_at;
-  for (const pool of JCZQ_POOLS) {
-    const items = [...(APP.sel[pool] || new Map()).values()];
-    if (items.length) {
-      lines.push(`\n—— ${POOL_TITLE[pool]} 单关 ${items.length}注 ${fmt(items.reduce((s, x) => s + (Number(x.stake) || 0), 0))}元 ——`);
-      for (const it of items) lines.push(`${it.mid} ${it.league} ${it.home} VS ${it.away}【${it.option}】@${fmt(it.odds)} ×${fmt(it.stake)}元`);
-      const pr = jczqPrizeRange(pool);
-      if (pr) lines.push(`    💰 预计奖金：${fmtMoney(pr.min)} ~ ${fmtMoney(pr.max)} 元`);
-    }
-    const cs = APP.combos[pool] || [];
-    if (cs.length) {
-      const serials = [...new Set(cs.map(c => c.serial || 2))].join("/");
-      lines.push(`\n—— ${POOL_TITLE[pool]} 过关 ${serials} ${cs.length}注 ——`);
-      for (const c of cs) {
-        const parts = [c.match_a, c.match_b];
-        if (c.match_c) parts.push(c.match_c);
-        lines.push(`${parts.join(" × ")} = ${fmt(c.odds)}（${c.serial || 2}串1）×2元`);
-      }
-      const pr = combosPrizeRange(cs);
-      if (pr) lines.push(`    💰 预计奖金：${fmtMoney(pr.min)} ~ ${fmtMoney(pr.max)} 元`);
+  let ticketNo = 0;
+  const totalNotes = blocks.reduce((s, b) => s + b.notes, 0);
+  const totalStake = blocks.reduce((s, b) => s + b.stake, 0);
+  for (const b of blocks) {
+    ticketNo += 1;
+    lines.push(`\n================ 第 ${ticketNo} 张 ================`);
+    lines.push(`${b.game}${b.issue ? " 第" + b.issue + "期" : ""} · ${b.name}`);
+    lines.push(`票数注数：1张${b.notes}注    金额：${fmt(b.stake)} 元`);
+    lines.push(`过关：${b.serial}    倍数：${b.multiplier}`);
+    for (const r of b.rows) {
+      lines.push(`${r.no}  ${r.teams}`);
+      lines.push(`     ${r.game ? r.game + "  " : ""}${r.pick}`);
     }
   }
-  for (const t of APP.passTickets) {
-    lines.push(`\n—— 过关 ${t.M}串1（${t.matches.length}场复式） ${t.notes}注 ${fmt(t.stake)}元 ——`);
-    for (const e of t.matches) lines.push(`  ${e.mid} ${e.league} ${e.home} VS ${e.away}【${e.options.join("/")}】`);
-  }
-  for (const pool of ZUCAI_ORDER) {
-    const issue = zucaiIssue(pool);
-    const sel = APP.zsel[pool];
-    if (!issue || !sel) continue;
-    const rows = Object.values(sel.rows || {}).filter(r => (r.options || []).length);
-    if (!rows.length) continue;
-    let notes = 1;
-    for (const r of rows) notes *= r.options.length;
-    lines.push(`\n—— ${POOL_TITLE[pool]} ${issue.issue}期 复式${notes}注 ${fmt(notes * 2)}元 ——`);
-    const teamMap = {};
-    for (const m of issue.matches) { teamMap[m.num] = `${m.home} VS ${m.away}`; teamMap[`${m.num}-主`] = m.home; teamMap[`${m.num}-客`] = m.away; }
-    for (const [k, r] of Object.entries(sel.rows || {})) {
-      if (!(r.options || []).length) continue;
-      const t = teamMap[k] || k;
-      lines.push(`场${k} ${t}: ${r.options.join("/")}`);
-    }
-    const pr = zucaiPrizeRange(pool);
-    if (pr) lines.push(`    💰 预计奖金（估算，奖池玩法以开奖为准）：${fmtMoney(pr.min)} ~ ${fmtMoney(pr.max)} 元`);
-  }
-  const total = $("slip-total").textContent;
-  lines.push(`\n合计 ${total} 元（预算 ${APP.budget} 元）`);
+  lines.push(`\n合计：${blocks.length} 张 / ${totalNotes} 注 / ${fmt(totalStake)} 元（预算 ${APP.budget} 元）`);
+  lines.push("注：明细信息请以彩票票面实际显示为准。");
+  lines.push(`保存时间：${APP.data.generated_at}`);
   return lines.join("\n");
 }
 
@@ -1056,24 +1169,71 @@ function fallbackCopy(text, done) {
 }
 
 function pngSlip() {
-  const text = slipText();
-  const lines = text.split("\n");
+  const blocks = buildTicketBlocks();
   const canvas = $("slip-canvas");
   const ctx = canvas.getContext("2d");
-  const W = 1200, LH = 34, pad = 40;
-  const H = Math.max(600, pad * 2 + lines.length * LH + 60);
-  canvas.width = W; canvas.height = H;
-  ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = "#1f2937"; ctx.font = "30px 'PingFang SC', 'Microsoft YaHei', sans-serif";
-  let y = pad;
-  for (const ln of lines) {
-    if (ln.startsWith("【")) { ctx.fillStyle = "#2563eb"; ctx.font = "bold 34px 'PingFang SC','Microsoft YaHei',sans-serif"; }
-    else if (ln.startsWith("——")) { ctx.fillStyle = "#2563eb"; ctx.font = "bold 30px 'PingFang SC','Microsoft YaHei',sans-serif"; }
-    else if (ln.startsWith("合计")) { ctx.fillStyle = "#b45309"; ctx.font = "bold 32px 'PingFang SC','Microsoft YaHei',sans-serif"; }
-    else { ctx.fillStyle = "#1f2937"; ctx.font = "28px 'PingFang SC','Microsoft YaHei',sans-serif"; }
-    ctx.fillText(ln, pad, y);
-    y += LH;
+  const W = 1000, M = 46, LH = 40;
+  const F = "'PingFang SC','Microsoft YaHei',sans-serif";
+
+  // 计算高度：每张票 = 头部区 + 行数*LH*1.4 + 底注
+  let totalH = 160;
+  for (const b of blocks) {
+    totalH += 150 + b.rows.length * 84 + 120;
   }
+  const H = Math.max(700, totalH);
+  canvas.width = W; canvas.height = H;
+  ctx.fillStyle = "#eef2f7"; ctx.fillRect(0, 0, W, H);
+
+  let y = 40;
+  // 全局标题
+  ctx.fillStyle = "#1f2937"; ctx.font = `bold 40px ${F}`;
+  ctx.fillText("抓龙助手 · 投注单", M, y + 30);
+  y += 74;
+
+  let ticketNo = 0;
+  const totalNotes = blocks.reduce((s, b) => s + b.notes, 0);
+  const totalStake = blocks.reduce((s, b) => s + b.stake, 0);
+
+  for (const b of blocks) {
+    ticketNo += 1;
+    const cardH = 120 + b.rows.length * 84 + 110;
+    // 票卡背景
+    ctx.fillStyle = "#ffffff";
+    roundRect(ctx, M, y, W - M * 2, cardH, 14);
+    ctx.strokeStyle = "#d1d9e6"; ctx.lineWidth = 2;
+    ctx.stroke();
+    let cy = y + 40;
+    // 票头
+    ctx.fillStyle = "#2563eb"; ctx.font = `bold 30px ${F}`;
+    ctx.fillText(`${b.game}${b.issue ? " 第" + b.issue + "期" : ""} · ${b.name}`, M + 28, cy);
+    ctx.fillStyle = "#64748b"; ctx.font = `22px ${F}`;
+    ctx.fillText(`票数注数：1张${b.notes}注`, M + 28, cy + 34);
+    ctx.fillText(`金额：${fmt(b.stake)} 元`, W - M - 28 - ctx.measureText(`金额：${fmt(b.stake)} 元`).width, cy + 34);
+    ctx.fillStyle = "#b45309"; ctx.font = `bold 24px ${F}`;
+    ctx.fillText(`过关：${b.serial}    倍数：${b.multiplier}`, M + 28, cy + 72);
+    cy += 96;
+    // 分隔线
+    ctx.strokeStyle = "#e5eaf1"; ctx.beginPath(); ctx.moveTo(M + 20, cy); ctx.lineTo(W - M - 20, cy); ctx.stroke();
+    // 行
+    for (const r of b.rows) {
+      ctx.fillStyle = "#1f2937"; ctx.font = `600 26px ${F}`;
+      ctx.fillText(`${r.no}  ${r.teams}`, M + 30, cy + 32);
+      ctx.fillStyle = "#334155"; ctx.font = `24px ${F}`;
+      ctx.fillText(`    ${r.game ? r.game + "  " : ""}${r.pick}`, M + 30, cy + 66);
+      cy += 84;
+    }
+    // 底注
+    ctx.strokeStyle = "#e5eaf1"; ctx.beginPath(); ctx.moveTo(M + 20, cy); ctx.lineTo(W - M - 20, cy); ctx.stroke();
+    ctx.fillStyle = "#94a3b8"; ctx.font = `20px ${F}`;
+    ctx.fillText("注：明细信息请以彩票票面实际显示为准。", M + 28, cy + 34);
+    ctx.fillText(`保存时间：${APP.data.generated_at}`, M + 28, cy + 64);
+    y += cardH + 26;
+  }
+
+  // 汇总
+  ctx.fillStyle = "#b45309"; ctx.font = `bold 28px ${F}`;
+  ctx.fillText(`合计：${blocks.length} 张 / ${totalNotes} 注 / ${fmt(totalStake)} 元（预算 ${APP.budget} 元）`, M, y + 30);
+
   const a = document.createElement("a");
   a.download = `抓龙助手_${APP.data.generated_at.slice(0, 10)}.png`;
   a.href = canvas.toDataURL("image/png");
@@ -1081,37 +1241,30 @@ function pngSlip() {
   toast("截图已生成（保存在下载目录）");
 }
 
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 function saveSlip() {
-  const groups = [];
-  for (const pool of JCZQ_POOLS) {
-    const items = [...(APP.sel[pool] || new Map()).values()];
-    if (items.length) groups.push({ game_type: POOL_TITLE[pool], title: `单关${items.length}注`,
-      selections: items.map(it => `${it.mid} ${it.league} ${it.home} VS ${it.away} ${it.option}@${fmt(it.odds)}`),
-      stake: items.reduce((s, x) => s + (Number(x.stake) || 0), 0) });
-  }
-  for (const pool of ZUCAI_ORDER) {
-    const issue = zucaiIssue(pool);
-    const sel = APP.zsel[pool];
-    if (!issue || !sel) continue;
-    const rows = Object.values(sel.rows || {}).filter(r => (r.options || []).length);
-    if (!rows.length) continue;
-    let notes = 1;
-    for (const r of rows) notes *= r.options.length;
-    groups.push({ game_type: POOL_TITLE[pool], issue: issue.issue, title: `复式${notes}注`,
-      selections: Object.entries(sel.rows || {}).filter(([, r]) => (r.options || []).length)
-        .map(([k, r]) => `场${k}: ${r.options.join("/")}`), stake: notes * 2 });
-  }
-  for (const t of APP.passTickets) {
-    groups.push({ game_type: `过关${t.M}串1`, issue: "", title: `${t.matches.length}场复式${t.notes}注`,
-      selections: t.matches.map(e => `${e.mid} ${e.league} ${e.home} VS ${e.away}【${e.options.join("/")}】`),
-      stake: t.stake });
-  }
-  if (!groups.length) { toast("投注单是空的"); return; }
+  const blocks = buildTicketBlocks();
+  if (!blocks.length) { toast("投注单是空的"); return; }
+  const groups = blocks.map(b => ({
+    game_type: b.game + (b.issue ? " 第" + b.issue + "期" : ""),
+    issue: b.issue, title: `${b.name} ${b.serial} ${b.notes}注`,
+    selections: b.rows.map(r => `${r.no} ${r.teams} ${r.game ? r.game + " " : ""}${r.pick}`),
+    stake: b.stake,
+  }));
   const total = groups.reduce((s, g) => s + g.stake, 0);
   api("/api/bet", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ bet_date: APP.data.generated_at.slice(0, 10), game_type: "多玩法组合",
-      issue: "", title: `方案 ${groups.length} 组`, selections: groups,
+      issue: "", title: `方案 ${blocks.length} 张`, selections: groups,
       stake: total, odds: "", note: slipText().slice(0, 800) }),
   }).then(r => { if (r.ok) toast("已保存到历史"); else toast("保存失败"); });
 }
