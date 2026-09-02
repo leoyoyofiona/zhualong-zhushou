@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import os
 import sqlite3
@@ -27,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import engine
+import review
 import sources
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -90,6 +92,19 @@ def init_db():
         created_at TEXT, bet_date TEXT, game_type TEXT, issue TEXT,
         title TEXT, selections TEXT, stake REAL, odds TEXT,
         status TEXT DEFAULT 'pending', profit REAL DEFAULT 0, note TEXT
+    )""")
+    # 预测快照：每次生成方案(一键推荐/今日投注分析/采用推荐)自动存档，用于复盘训练
+    conn.execute("""CREATE TABLE IF NOT EXISTS snapshots(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT, bet_date TEXT, budget REAL,
+        source TEXT, plan TEXT, summary TEXT
+    )""")
+    # 赛果：以"比赛id+日期"为键的最终比分（含半场），用于复盘比对
+    conn.execute("""CREATE TABLE IF NOT EXISTS results(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bet_date TEXT, match_key TEXT, league TEXT, home TEXT, away TEXT,
+        hs INTEGER, ha INTEGER, fs_h INTEGER, fs_a INTEGER,
+        UNIQUE(bet_date, match_key)
     )""")
     conn.commit()
     conn.close()
@@ -237,6 +252,23 @@ class Handler(BaseHTTPRequestHandler):
         elif p == "/api/settings":
             self._json({"ok": True, "settings": load_settings(),
                         "defaults": {"budget": 100, "weights": engine.DEFAULT_WEIGHTS}})
+        elif p == "/api/snapshots":
+            date = parse_qs(u.query).get("date", [""])[0]
+            rows = db_query("SELECT * FROM snapshots WHERE bet_date=? ORDER BY id DESC",
+                            (date,)) if date else db_query("SELECT * FROM snapshots ORDER BY id DESC LIMIT 30")
+            self._json({"ok": True, "snapshots": rows})
+        elif p == "/api/results":
+            date = parse_qs(u.query).get("date", [""])[0]
+            rows = db_query("SELECT * FROM results WHERE bet_date=? ORDER BY id", (date,)) if date \
+                else db_query("SELECT * FROM results ORDER BY bet_date DESC, id LIMIT 200")
+            self._json({"ok": True, "results": rows})
+        elif p == "/api/review":
+            date = parse_qs(u.query).get("date", [""])[0]
+            self._json(self._do_review(date))
+        elif p == "/api/budgets":
+            s = load_settings()
+            self._json({"ok": True, "budgets": {k: s.get(k, 100 if k == "daily" else 0)
+                                                for k in ("daily", "monthly", "yearly")}})
         elif not p.startswith("/api/"):
             # 其余静态资源（qr 收款码等图片、前端文件）
             self._serve_static(p[1:] or "index.html")
@@ -284,6 +316,47 @@ class Handler(BaseHTTPRequestHandler):
                     cur[k] = body[k]
             save_settings(cur)
             self._json({"ok": True, "settings": cur})
+        elif p == "/api/budgets":
+            cur = load_settings()
+            for k in ("daily", "monthly", "yearly"):
+                if k in body:
+                    try:
+                        cur[k] = float(body[k])
+                    except (TypeError, ValueError):
+                        pass
+            save_settings(cur)
+            self._json({"ok": True, "budgets": {k: cur.get(k, 0) for k in ("daily", "monthly", "yearly")}})
+        elif p == "/api/allocation":
+            self._json({"ok": True, "allocation": self._allocation(body)})
+        elif p == "/api/snapshot":
+            rid = db_exec(
+                "INSERT INTO snapshots(created_at, bet_date, budget, source, plan, summary)"
+                " VALUES(?,?,?,?,?,?)",
+                (time.strftime("%Y-%m-%d %H:%M:%S"), body.get("date", ""),
+                 float(body.get("budget") or 0), body.get("source", "manual"),
+                 json.dumps(body.get("plan", {}), ensure_ascii=False),
+                 json.dumps(body.get("summary", {}), ensure_ascii=False)))
+            self._json({"ok": True, "id": rid})
+        elif p == "/api/results":
+            date = body.get("date", "")
+            n = 0
+            for r in body.get("results", []):
+                try:
+                    db_exec("INSERT OR REPLACE INTO results(bet_date, match_key, league, home, away, hs, ha, fs_h, fs_a)"
+                            " VALUES(?,?,?,?,?,?,?,?,?)",
+                            (date, review.match_key(r.get("home", ""), r.get("away", "")),
+                             r.get("league", ""), r.get("home", ""), r.get("away", ""),
+                             r.get("hs"), r.get("ha"), r.get("fs_h"), r.get("fs_a")))
+                    n += 1
+                except Exception:  # noqa: BLE001
+                    continue
+            self._json({"ok": True, "saved": n})
+        elif p == "/api/review":
+            self._json(self._do_review(body.get("date", "")))
+        elif p == "/api/llm-review":
+            self._llm_review(body)
+        elif p == "/api/analyze-today":
+            self._analyze_today(body)
         elif p == "/api/llm":
             self._llm(body)
         else:
@@ -330,6 +403,32 @@ class Handler(BaseHTTPRequestHandler):
                                         "profit": round(r["p"] or 0, 2)} for r in rows},
         }
 
+    def _llm_review(self, body):
+        cfg = {"api_key": body.get("api_key", ""), "base_url": body.get("base_url", ""),
+               "model": body.get("model", "")}
+        date = body.get("date", "")
+        ev = self._do_review(date)
+        rows = []
+        for pool, st in (ev.get("pools") or {}).items():
+            for r in st.get("rows", []):
+                if r.get("correct") is not None:
+                    rows.append({"玩法": pool, "场次": r.get("mid") or r.get("num"),
+                                 "对阵": f"{r.get('home')}vs{r.get('away')}",
+                                 "我选": r.get("option") or "/".join(r.get("options", [])),
+                                 "赛果": r.get("actual"), "对错": "中" if r.get("correct") else "错"})
+        stats = ev.get("stats") or []
+        system = ("你是足彩复盘分析专家。根据'预测 vs 赛果'数据，找出每次猜错的原因"
+                  "（实力差距/冷门/红黄牌少打一人/状态/伤停/教练战术/运气等），"
+                  "并给出下次改进的具体建议。只输出 JSON。")
+        user = (f"复盘日期：{date}\n各玩法命中率：{json.dumps(stats, ensure_ascii=False)}\n"
+                f"逐场明细：{json.dumps(rows, ensure_ascii=False)}\n"
+                "输出 JSON：{\"summary\":\"本期复盘总结\","
+                "\"lessons\":[{\"match\":\"周六001 主vs客\",\"prediction\":\"胜\",\"actual\":\"平\","
+                "\"cause\":\"可能原因\",\"improve\":\"下次改进\"}],"
+                "\"model_notes\":\"对模型的修正建议（如某玩法偏差、阈值调整）\"}")
+        result = engine.llm_chat_json(cfg, system, user)
+        self._json(result)
+
     def _llm(self, body):
         cfg = {"api_key": body.get("api_key", ""), "base_url": body.get("base_url", ""),
                "model": body.get("model", "")}
@@ -340,6 +439,93 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "数据尚未就绪，请先刷新"})
             return
         result = engine.llm_analyze(cfg, data, plan, budget=budget)
+        self._json(result)
+
+    # ---- 复盘：预测快照 vs 赛果 ----
+
+    def _do_review(self, date):
+        snaps = db_query("SELECT * FROM snapshots WHERE bet_date=? ORDER BY id DESC LIMIT 5", (date,)) \
+            if date else db_query("SELECT * FROM snapshots ORDER BY id DESC LIMIT 5")
+        if not snaps:
+            return {"ok": True, "date": date, "stats": [], "detail": None,
+                    "msg": "该日期还没有预测快照（先做一次 推荐/今日分析 再复盘）"}
+        snap = snaps[0]
+        try:
+            snap_plan = json.loads(snap["plan"])
+        except Exception:  # noqa: BLE001
+            snap_plan = {}
+        # 取赛果（该日期 + 顺延2天，覆盖晚场比赛）
+        res_rows = db_query("SELECT * FROM results WHERE bet_date IN (?,?,?)",
+                            (date, self._next_day(date), self._next_day(date, 2)))
+        results = {}
+        for r in res_rows:
+            results[review.match_key(r["home"], r["away"])] = {
+                "hs": r["hs"], "ha": r["ha"], "h": r["fs_h"], "a": r["fs_a"]}
+        ev = review.evaluate_snapshot(snap_plan, results) if snap_plan else \
+            {"pools": {}, "summary": []}
+        return {"ok": True, "date": date, "stats": ev["summary"],
+                "pools": ev["pools"], "detail": snap_plan.get("meta"),
+                "snapshot_id": snap["id"], "snapshot_time": snap["created_at"],
+                "evaluated_count": sum(len(v.get("rows", [])) for v in ev["pools"].values()),
+                "note": "命中统计只含已录入赛果的场次；半全场类玩法需录入半场比分才能判定。"}
+
+    @staticmethod
+    def _next_day(date, n=1):
+        try:
+            d = dt.date.fromisoformat(date) + dt.timedelta(days=n)
+            return d.isoformat()
+        except Exception:  # noqa: BLE001
+            return date
+
+    # ---- 资金方案 ----
+
+    def _allocation(self, body):
+        daily = float(body.get("daily") or 0)
+        monthly = float(body.get("monthly") or 0)
+        yearly = float(body.get("yearly") or 0)
+        # 池玩法每期成本上限经验值（各玩法建议占比，和为 100）
+        plan = engine.DEFAULT_WEIGHTS
+        alloc = {}
+        if daily > 0:
+            alloc["daily"] = {k: round(daily * w, 2) for k, w in plan.items()}
+        if monthly > 0:
+            # 每月约 26 个投注日，先按每日均摊再按玩法
+            alloc["monthly_daily_avg"] = round(monthly / 26, 2)
+        if yearly > 0:
+            alloc["yearly_monthly_avg"] = round(yearly / 12, 2)
+        advice = [
+            "1) 单注按 1/4 凯利、下限 2 元；单期任九/14场复式成本 ≤ 当日预算的 10%。",
+            "2) 串关只玩 2串1 以内（返奖率按 0.69^n 指数衰减），禁止 3+ 串。",
+            "3) 比分/半全场/4场进球属高赔娱乐，分配最小额度；主战场放 胜平负/任九。",
+            "4) 设月度亏损红线（如月预算 30%），到线即停，不追号、不梭哈。",
+        ]
+        return {"budgets": {"daily": daily, "monthly": monthly, "yearly": yearly},
+                "allocation": alloc, "advice": advice,
+                "weights": plan}
+
+    # ---- 一键今日投注分析：内置引擎 + 可选 DeepSeek 统筹 ----
+
+    def _analyze_today(self, body):
+        cfg = {"api_key": body.get("api_key", ""), "base_url": body.get("base_url", ""),
+               "model": body.get("model", "")}
+        daily = float(body.get("daily") or body.get("budget") or 100)
+        monthly = float(body.get("monthly") or 0)
+        yearly = float(body.get("yearly") or 0)
+        mode = body.get("mode", "normal")
+        with _state_lock:
+            data = _state["data"]
+        if not data:
+            self._json({"ok": False, "error": "数据尚未就绪，请先刷新"})
+            return
+        base_plan = engine.build_full_plan(data, budget=daily, mode=mode)
+        result = {"ok": True, "plan": base_plan,
+                  "allocation": self._allocation({"daily": daily, "monthly": monthly, "yearly": yearly})}
+        if cfg.get("api_key"):
+            # DeepSeek 统筹：传结构化比赛/赔率/内置模型与预算，让它补场外因素并给最终分配
+            llm = engine.llm_analyze(cfg, data, base_plan, budget=daily)
+            result["llm"] = llm
+            if llm.get("ok") and isinstance(llm.get("result"), dict):
+                result["llm_plan"] = llm["result"]
         self._json(result)
 
 

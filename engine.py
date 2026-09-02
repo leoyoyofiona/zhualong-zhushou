@@ -682,20 +682,52 @@ def build_full_plan(data, budget=100.0, weights=None, mode="normal"):
 
 # ---------------- 可选大模型分析 ----------------
 
-def llm_analyze(cfg, data, plan, budget=100.0, timeout=150.0):
-    """调用 OpenAI 兼容接口（DeepSeek/OpenAI/Kimi/Qwen 等）做深度分析。
-
-    cfg: {api_key, base_url, model}。base_url 形如 https://api.deepseek.com
-    """
+def llm_chat_json(cfg, system, user, timeout=150.0):
+    """通用 OpenAI 兼容调用：返回 {"ok":True,"result":obj,"model":...} 或 {"ok":False,"error":...}"""
     api_key = (cfg.get("api_key") or "").strip()
     if not api_key:
         return {"ok": False, "error": "未配置 API Key（设置→大模型分析→填入你的 Key）"}
     base = (cfg.get("base_url") or "https://api.deepseek.com").rstrip("/")
     model = (cfg.get("model") or "deepseek-chat").strip()
     url = base + "/chat/completions"
-    if base.endswith("/v1"):
-        url = base + "/chat/completions"
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+        "temperature": 0.4,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+        "User-Agent": "zucai-dashboard/1.0",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "error": f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"请求失败: {e}"}
+    try:
+        obj = json.loads(raw)
+        content = obj["choices"][0]["message"]["content"]
+    except Exception:  # noqa: BLE001
+        return {"ok": False, "error": f"响应解析失败: {raw[:200]}"}
+    content = content.strip()
+    if content.startswith("```"):
+        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content)
+    try:
+        return {"ok": True, "result": json.loads(content), "model": model}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"内容不是合法 JSON: {e}"}
 
+
+def llm_analyze(cfg, data, plan, budget=100.0, timeout=150.0):
+    """调用 OpenAI 兼容接口（DeepSeek/OpenAI/Kimi/Qwen 等）做深度分析。
+
+    cfg: {api_key, base_url, model}。base_url 形如 https://api.deepseek.com
+    """
     matches = (data.get("jczq") or {}).get("matches") or []
     brief = []
     for m in matches[:30]:
@@ -722,39 +754,7 @@ def llm_analyze(cfg, data, plan, budget=100.0, timeout=150.0):
             "\"ren9\":[9,10,11,12,13,14,15,16,17],\"ban6\":{},\"goal4\":{}},"
             "\"risks\":[\"...\"]}。"
             "stake 单位为元，全部玩法合计不超过预算。")
-
-    body = json.dumps({
-        "model": model,
-        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        "temperature": 0.4,
-        "response_format": {"type": "json_object"},
-        "stream": False,
-    }).encode("utf-8")
-    req = urllib.request.Request(url, data=body, headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}",
-        "User-Agent": "zucai-dashboard/1.0",
-    })
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-    except urllib.error.HTTPError as e:
-        return {"ok": False, "error": f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')[:200]}"}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"请求失败: {e}"}
-    try:
-        obj = json.loads(raw)
-        content = obj["choices"][0]["message"]["content"]
-    except Exception:  # noqa: BLE001
-        return {"ok": False, "error": f"响应解析失败: {raw[:200]}"}
-    # 兼容返回内容里带 ```json 包裹
-    content = content.strip()
-    if content.startswith("```"):
-        content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content)
-    try:
-        return {"ok": True, "result": json.loads(content), "model": model}
-    except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"内容不是合法 JSON: {e}"}
+    return llm_chat_json(cfg, system, user, timeout=timeout)
 
 
 if __name__ == "__main__":

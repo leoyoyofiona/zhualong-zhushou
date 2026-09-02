@@ -813,6 +813,7 @@ function applyAllRecs() {
   for (const pool of [...JCZQ_POOLS, ...ZUCAI_ORDER]) applyPoolRec(pool);
   renderCards();
   renderSlip();
+  saveSnapshot("apply-recs"); // 预测快照自动归档，供复盘训练
   toast("已采用全部推荐方案（可在卡片上修改）");
 }
 
@@ -1269,6 +1270,236 @@ function saveSlip() {
   }).then(r => { if (r.ok) toast("已保存到历史"); else toast("保存失败"); });
 }
 
+/* ---------------- 预测快照 / 今日投注分析 / 复盘（模型训练闭环） ---------------- */
+
+const POOL_CN = { had: "胜平负", ttg: "总进球数", crs: "比分", hafu: "半全场",
+  zucai14: "胜负彩14场", ren9: "任选9场", ban6: "6场半全场", goal4: "4场进球" };
+
+function llmCfg() {
+  return { api_key: APP.settings.llm_key || "", base_url: APP.settings.llm_base || "https://api.deepseek.com",
+    model: APP.settings.llm_model || "deepseek-chat" };
+}
+
+/* 把当前投注单整理成"可复盘"的结构化快照 */
+function buildSnapshotPlan() {
+  const date = APP.data.generated_at.slice(0, 10);
+  const jczq = {};
+  for (const pool of JCZQ_POOLS) {
+    if (APP.cardPass[pool] && APP.cardPass[pool].mode === "parlay") continue;
+    const items = [...(APP.sel[pool] || new Map()).values()];
+    if (items.length) jczq[pool] = items.map(it => ({ mid: it.mid, home: it.home, away: it.away, option: it.option, odds: it.odds }));
+  }
+  const zucai = {};
+  for (const pool of ZUCAI_ORDER) {
+    const issue = zucaiIssue(pool);
+    const sel = APP.zsel[pool];
+    if (!issue || !sel) continue;
+    const rows = [];
+    if (pool === "goal4") {
+      const byNum = {};
+      for (const [k, r] of Object.entries(sel.rows)) {
+        if (!(r.options || []).length) continue;
+        const [num, side] = k.split("-");
+        byNum[num] = byNum[num] || {};
+        byNum[num][side] = r.options.slice();
+      }
+      for (const m of issue.matches) {
+        const s = byNum[m.num];
+        if (!s) continue;
+        rows.push({ num: m.num, home: m.home, away: m.away, home_options: s["主"] || [], away_options: s["客"] || [] });
+      }
+    } else {
+      for (const m of issue.matches) {
+        const r = sel.rows[m.num];
+        if (!r || !(r.options || []).length) continue;
+        rows.push({ num: m.num, home: m.home, away: m.away, options: r.options.slice() });
+      }
+    }
+    if (rows.length) zucai[pool] = rows;
+  }
+  return { meta: { date, budget: APP.budget }, date, jczq, zucai };
+}
+
+function saveSnapshot(source) {
+  if (!APP.data) return;
+  const plan = buildSnapshotPlan();
+  const total = $("slip-total") ? Number($("slip-total").textContent) || 0 : 0;
+  api("/api/snapshot", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date: plan.date, budget: APP.budget, source: source || "zhualong", plan, summary: { total } }),
+  });
+}
+
+/* 🎯 今日投注分析：内置引擎 + 预算分配 + 可选 DeepSeek 统筹 */
+async function analyzeToday() {
+  const btn = $("btn-analyze-today");
+  const old = btn.textContent;
+  btn.textContent = "⏳ 正在分析（DeepSeek 可能需1-2分钟）…";
+  btn.disabled = true;
+  const out = $("analyze-out");
+  out.innerHTML = '<p style="color:var(--dim)">后台整合：官方/备用源赔率 → 概率模型 → 资金分配 → 深度统筹…</p>';
+  $("modal-analyze").classList.remove("hidden");
+  try {
+    const budgets = readBudgets();
+    const r = await api("/api/analyze-today", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...llmCfg(), daily: budgets.daily, monthly: budgets.monthly, yearly: budgets.yearly }),
+    });
+    if (!r.ok) { out.innerHTML = `<div class="err">❌ ${esc(r.error)}</div>`; return; }
+    APP._lastAnalyze = r;
+    renderAnalyzeResult(r);
+  } catch (e) {
+    out.innerHTML = `<div class="err">❌ ${esc(e.message)}</div>`;
+  } finally {
+    btn.textContent = old;
+    btn.disabled = false;
+  }
+}
+
+function readBudgets() {
+  const num = (id, d) => { const v = Number($(id).value); return v > 0 ? v : d; };
+  return { daily: num("b-daily", 100), monthly: num("b-monthly", 0), yearly: num("b-yearly", 0) };
+}
+
+function renderAnalyzeResult(r) {
+  const out = $("analyze-out");
+  const alloc = (r.allocation && r.allocation.allocation) || {};
+  const adv = (r.allocation && r.allocation.advice) || [];
+  let html = "<h4>📐 资金分配（按日预算）</h4><table class='htable' style='margin-bottom:8px'><tr><th>玩法</th><th>分配(元)</th></tr>";
+  for (const [k, v] of Object.entries(alloc.daily || {})) html += `<tr><td>${esc(POOL_CN[k] || k)}</td><td>${fmt(v)}</td></tr>`;
+  html += "</table><div style='font-size:11px;color:var(--dim)'>" + adv.map(esc).join("<br>") + "</div>";
+  html += `<h4>⚙️ 内置模型方案（${fmt(r.plan.total_recommended)} 元 / 预算 ${fmt(r.plan.budget)} 元）</h4>`;
+  for (const [pool, pl] of Object.entries(r.plan.plans || {})) {
+    const spent = pl.spent || (pl.ticket ? pl.ticket.stake : 0) || 0;
+    if (spent > 0) html += `<div style="font-size:12px">· ${esc(pl.label)}：约 ${fmt(spent)} 元</div>`;
+  }
+  if (r.llm) {
+    html += "<h4>🤖 DeepSeek 统筹建议</h4>";
+    if (r.llm.ok) {
+      const lr = r.llm.result || {};
+      html += `<div class="llm-result">${esc(JSON.stringify(lr, null, 2))}</div>`;
+    } else {
+      html += `<div class="llm-result err">❌ ${esc(r.llm.error)}<br><small>未填 Key 则只显示内置引擎方案；在 设置→大模型分析 填入后重试。</small></div>`;
+    }
+  }
+  out.innerHTML = html;
+}
+
+function adoptLastAnalyze() {
+  const r = APP._lastAnalyze;
+  if (!r || !r.plan) { toast("还没有分析结果"); return; }
+  APP.plan = r.plan;
+  applyAllRecs();
+  saveSnapshot("analyze-today");
+  toast("已采用今日分析方案并保存预测快照");
+}
+
+/* ---------------- 复盘 ---------------- */
+
+async function openReview() {
+  $("modal-review").classList.remove("hidden");
+  const today = APP.data.generated_at.slice(0, 10);
+  $("rv-date").value = today;
+  $("rv-llm").innerHTML = "";
+  $("rv-stats").innerHTML = "";
+  $("rv-rows").innerHTML = "";
+  await loadReviewPlan();
+}
+
+async function loadReviewPlan() {
+  const date = $("rv-date").value;
+  const r = await api("/api/snapshots?date=" + encodeURIComponent(date));
+  const info = $("rv-info");
+  $("rv-llm").innerHTML = "";
+  if (!r.snapshots || !r.snapshots.length) {
+    info.textContent = "该日期没有预测快照 —— 先做一次 今日投注分析/一键推荐 产生预测，开奖后再来复盘。";
+    $("rv-entry").innerHTML = "";
+    $("rv-stats").innerHTML = "";
+    $("rv-rows").innerHTML = "";
+    return;
+  }
+  const snap = r.snapshots[0];
+  let plan = {};
+  try { plan = JSON.parse(snap.plan); } catch (e) { plan = {}; }
+  APP._reviewPlan = plan;
+  info.textContent = `预测快照 #${snap.id} · ${snap.created_at} · 预算 ${fmt(snap.budget || 0)} 元 · ${snap.source}`;
+  const seen = new Map();
+  const pushMatch = (home, away) => {
+    if (home && away && !seen.has(home + "|" + away)) seen.set(home + "|" + away, { home, away });
+  };
+  for (const pool of JCZQ_POOLS) for (const p of (plan.jczq || {})[pool] || []) pushMatch(p.home, p.away);
+  for (const pool of ZUCAI_ORDER) for (const row of (plan.zucai || {})[pool] || []) pushMatch(row.home, row.away);
+  const entry = [...seen.values()].map((m, i) =>
+    `<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:3px 0;flex-wrap:wrap">
+      <span style="min-width:170px"><b>${esc(m.home)}</b> VS <b>${esc(m.away)}</b></span>
+      <label>半场 主 <input id="rvhs${i}" type="number" style="width:40px"> <input id="rvha${i}" type="number" style="width:40px"> 客</label>
+      <label>全场 主 <input id="rvh${i}" type="number" style="width:40px" min="0"> <input id="rva${i}" type="number" style="width:40px" min="0"> 客</label>
+    </div>`).join("");
+  $("rv-entry").innerHTML = entry || "<span style='color:var(--dim)'>快照里没有可录入的比赛</span>";
+  await loadReviewResult();
+}
+
+async function saveReviewResults() {
+  const date = $("rv-date").value;
+  const plan = APP._reviewPlan || {};
+  const seen = new Map();
+  const pushMatch = (home, away) => {
+    if (home && away && !seen.has(home + "|" + away)) seen.set(home + "|" + away, { home, away });
+  };
+  for (const pool of JCZQ_POOLS) for (const p of (plan.jczq || {})[pool] || []) pushMatch(p.home, p.away);
+  for (const pool of ZUCAI_ORDER) for (const row of (plan.zucai || {})[pool] || []) pushMatch(row.home, row.away);
+  const matches = [...seen.values()];
+  const results = [];
+  matches.forEach((m, i) => {
+    const g = (id) => { const v = $(id); if (!v) return null; const n = Number(v.value); return Number.isFinite(n) ? n : null; };
+    const h = g(`rvh${i}`), a = g(`rva${i}`);
+    if (h === null || a === null) return;
+    const hs = g(`rvhs${i}`), ha = g(`rvha${i}`);
+    results.push({ home: m.home, away: m.away, hs: hs, ha: ha, fs_h: h, fs_a: a });
+  });
+  if (!results.length) { toast("请先填写至少一场的全场比分"); return; }
+  const r = await api("/api/results", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ date, results }),
+  });
+  if (r.ok) { toast(`已保存 ${r.saved} 场赛果`); await loadReviewResult(); }
+}
+
+async function loadReviewResult() {
+  const date = $("rv-date").value;
+  const r = await api("/api/review?date=" + encodeURIComponent(date));
+  $("rv-stats").innerHTML = r.stats && r.stats.length
+    ? "<table class='htable'><tr><th>玩法</th><th>命中/场次</th><th>命中率</th></tr>" +
+      r.stats.map(s => `<tr><td>${esc(POOL_CN[s.pool] || s.pool)}</td><td>${s.hit}/${s.total}</td>
+        <td style="color:${s.rate >= 50 ? "var(--accent2)" : "var(--danger)"}"><b>${s.rate}%</b></td></tr>`).join("") + "</table>"
+    : "<span style='color:var(--dim)'>还没有可判定的结果（先录入赛果）</span>";
+  const rowsHtml = [];
+  for (const [pool, st] of Object.entries(r.pools || {})) {
+    for (const row of st.rows || []) {
+      const c = row.correct;
+      rowsHtml.push(`<div style="font-size:12px;padding:2px 0">
+        <span class="status-pill ${c === true ? "win" : c === false ? "lose" : "pending"}">${c === true ? "✓中" : c === false ? "✗错" : "待定"}</span>
+        ${esc(POOL_CN[pool] || pool)} | ${esc(row.home || row.mid || "")}${row.away ? " VS " + esc(row.away) : ""}
+        | 我选 <b>${esc(row.pick || row.option || "")}</b> | 赛果 ${esc(row.actual || "—")}</div>`);
+    }
+  }
+  $("rv-rows").innerHTML = rowsHtml.join("") || "<span style='color:var(--dim)'>无</span>";
+}
+
+async function runReviewLLM() {
+  const date = $("rv-date").value;
+  const out = $("rv-llm");
+  const cfg = llmCfg();
+  if (!cfg.api_key) { out.innerHTML = '<div class="err">请在 设置→大模型分析 填入 DeepSeek API Key</div>'; return; }
+  out.innerHTML = '<span style="color:var(--dim)">DeepSeek 正在分析每场对错原因（1-2分钟）…</span>';
+  const r = await api("/api/llm-review", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...cfg, date }),
+  });
+  if (!r.ok) { out.innerHTML = `<div class="err">❌ ${esc(r.error)}</div>`; return; }
+  out.innerHTML = `<b style="color:var(--accent2)">✅ 复盘完成（${esc(r.model)}）</b>\n` + esc(JSON.stringify(r.result, null, 2));
+}
+
 /* ---------------- 设置 ---------------- */
 
 function openSettings() {
@@ -1282,6 +1513,30 @@ function openSettings() {
   $("llm-model").value = s.llm_model || "deepseek-chat";
   $("llm-key").value = s.llm_key || "";
   $("llm-result").innerHTML = "";
+  // 预算三档
+  $("b-daily").value = s.budget_daily || APP.budget || 100;
+  $("b-monthly").value = s.budget_monthly || "";
+  $("b-yearly").value = s.budget_yearly || "";
+}
+
+function showAllocation() {
+  const out = $("alloc-out");
+  const budgets = readBudgets();
+  out.innerHTML = '<span style="color:var(--dim)">计算中…</span>';
+  api("/api/allocation", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(budgets) }).then(r => {
+    if (!r.ok || !r.allocation) { out.innerHTML = '<span class="err">失败</span>'; return; }
+    const a = r.allocation.allocation || {};
+    let h = "";
+    if (a.daily) {
+      h += "<b>日预算分配：</b><br>";
+      for (const [k, v] of Object.entries(a.daily)) h += `· ${esc(POOL_CN[k] || k)}：${fmt(v)} 元<br>`;
+    }
+    if (a.monthly_daily_avg) h += `<br><b>月预算</b> ≈ 每个投注日 ${fmt(a.monthly_daily_avg)} 元<br>`;
+    if (a.yearly_monthly_avg) h += `<br><b>年预算</b> ≈ 每月 ${fmt(a.yearly_monthly_avg)} 元<br>`;
+    h += "<br><b>纪律清单：</b><br>" + r.allocation.advice.map(x => esc(x)).join("<br>");
+    out.innerHTML = h;
+  }).catch(() => { out.innerHTML = '<span class="err">计算失败</span>'; });
 }
 
 function saveSettings() {
@@ -1294,19 +1549,27 @@ function saveSettings() {
   for (const k in weights) weights[k] = weights[k] / sum;
   APP.weights = weights;
   const pref = document.querySelector('input[name="pref"]:checked').value;
+  const bd = Number($("b-daily").value) || 100;
+  const bm = Number($("b-monthly").value) || 0;
+  const by = Number($("b-yearly").value) || 0;
   APP.settings = {
     ...APP.settings,
     llm_base: $("llm-base").value.trim(),
     llm_model: $("llm-model").value.trim(),
     llm_key: $("llm-key").value.trim(),
+    budget_daily: bd, budget_monthly: bm, budget_yearly: by,
   };
   localStorage.setItem("zucai_settings", JSON.stringify(APP.settings));
   localStorage.setItem("zucai_weights", JSON.stringify(weights));
   api("/api/settings", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ weights, source_pref: pref }) });
+  api("/api/budgets", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ daily: bd, monthly: bm, yearly: by }) });
   APP.sourcePref = pref;
+  APP.budget = bd;
+  setBudget(bd); // 内部会重算方案
   $("modal-settings").classList.add("hidden");
-  recomputePlan().then(() => toast("设置已保存，方案已按新权重重算"));
+  toast("设置已保存，预算与方案已更新");
 }
 
 function llmTest() {
@@ -1428,11 +1691,20 @@ function bindEvents() {
   $("btn-save-slip").onclick = saveSlip;
   $("btn-settings").onclick = openSettings;
   $("btn-history").onclick = openHistory;
+  $("btn-review").onclick = openReview;
   $("btn-save-settings").onclick = saveSettings;
   $("btn-llm-test").onclick = llmTest;
+  $("btn-alloc").onclick = showAllocation;
+  $("btn-analyze-today").onclick = analyzeToday;
+  $("btn-analyze-adopt").onclick = adoptLastAnalyze;
+  $("btn-analyze-snapshot").onclick = () => { saveSnapshot("analyze-manual"); toast("已保存预测快照（复盘用）"); };
+  $("btn-rv-load").onclick = loadReviewPlan;
+  $("btn-rv-save").onclick = saveReviewResults;
+  $("btn-rv-analyze").onclick = runReviewLLM;
   $("budget-slider").oninput = (e) => {
     const v = Number(e.target.value);
     $("budget-num").value = v;
+    $("b-daily").value = v;
     setBudget(v);
   };
   $("budget-num").onchange = (e) => {

@@ -44,6 +44,7 @@
     </div>
     <div class="dd">
       <button id="btn-history" class="btn dd-trigger">📋 历史</button>
+      <button id="btn-review" class="btn" title="预测 vs 赛果：各玩法命中率与归因分析">📊 复盘</button>
       <div class="dd-panel dd-menu">
         <div class="dd-item" data-action="open-history">📋 查看历史记录</div>
         <div class="dd-item" data-action="clear-history">🗑 清空历史记录</div>
@@ -64,6 +65,7 @@
     <span id="budget-ok" class="ok-text"></span>
   </div>
   <div class="budget-item">
+    <button id="btn-analyze-today" class="btn primary" style="background:linear-gradient(135deg,#2563eb,#7c3aed)">🎯 今日投注分析</button>
     <button id="btn-apply-all" class="btn primary">✨ 一键推荐（最有把握）</button>
     <button id="btn-apply-manual" class="btn green">✋ 一键采用全部手动</button>
     <button id="btn-clear-slip" class="btn">清空投注单</button>
@@ -106,6 +108,14 @@
     <div class="modal-body">
       <h4>预算与分配（9种玩法权重，和为100%）</h4>
       <div class="weights-grid" id="weights-grid"></div>
+      <h4>💰 资金预算与分配方案</h4>
+      <div class="field-row">
+        <label class="field">今日预算(元)<input id="b-daily" type="number" min="0" step="10" value="100"></label>
+        <label class="field">月预算(元)<input id="b-monthly" type="number" min="0" step="50" value="3000" placeholder="选填"></label>
+        <label class="field">年预算(元)<input id="b-yearly" type="number" min="0" step="500" value="36000" placeholder="选填"></label>
+      </div>
+      <button id="btn-alloc" class="btn">📐 生成资金分配方案</button>
+      <div id="alloc-out" class="llm-result"></div>
       <h4>数据源</h4>
       <div class="radio-row" id="source-pref">
         <label><input type="radio" name="pref" value="auto"> 自动（官方→备用→演示）</label>
@@ -137,6 +147,45 @@
         <thead><tr><th>时间</th><th>玩法</th><th>期/场</th><th>内容</th><th>金额</th><th>状态</th><th>盈亏</th><th></th></tr></thead>
         <tbody id="htbody"></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+<!-- 今日投注分析结果弹窗 -->
+<div id="modal-analyze" class="modal hidden">
+  <div class="modal-box wide">
+    <div class="modal-head">🎯 今日投注分析 <button class="modal-close" data-close="modal-analyze">×</button></div>
+    <div class="modal-body">
+      <div id="analyze-out"><p style="color:var(--dim)">点击"今日投注分析"后在此查看结果。</p></div>
+    </div>
+    <div class="modal-foot">
+      <button id="btn-analyze-adopt" class="btn primary">✅ 采用此方案进投注单</button>
+      <button id="btn-analyze-snapshot" class="btn">💾 保存预测快照(供复盘)</button>
+      <button class="modal-close btn" data-close="modal-analyze">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 复盘弹窗 -->
+<div id="modal-review" class="modal hidden">
+  <div class="modal-box wide">
+    <div class="modal-head">📊 复盘：预测 vs 赛果 <button class="modal-close" data-close="modal-review">×</button></div>
+    <div class="modal-body">
+      <div class="radio-row" style="margin-bottom:8px">
+        <label>日期 <input id="rv-date" type="date" style="padding:3px 8px;border:1px solid var(--line);border-radius:6px"></label>
+        <button id="btn-rv-load" class="btn">载入当日预测</button>
+        <button id="btn-rv-analyze" class="btn primary">🤖 DeepSeek 复盘归因</button>
+      </div>
+      <div id="rv-info" style="font-size:12px;color:var(--dim)"></div>
+      <h4 style="margin-top:10px">① 录入赛果（只填比分即可，半场比分用于半全场判定）</h4>
+      <div id="rv-entry" style="max-height:220px;overflow:auto"></div>
+      <button id="btn-rv-save" class="btn" style="margin-top:6px">💾 保存赛果并复盘</button>
+      <h4>② 命中统计</h4>
+      <div id="rv-stats"></div>
+      <h4>③ 逐场对错</h4>
+      <div id="rv-rows" style="max-height:260px;overflow:auto"></div>
+      <h4>④ DeepSeek 归因分析</h4>
+      <div id="rv-llm" class="llm-result"></div>
     </div>
   </div>
 </div>
