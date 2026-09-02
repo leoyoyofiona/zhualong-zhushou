@@ -723,10 +723,11 @@ def llm_chat_json(cfg, system, user, timeout=150.0):
         return {"ok": False, "error": f"内容不是合法 JSON: {e}"}
 
 
-def llm_analyze(cfg, data, plan, budget=100.0, timeout=150.0):
+def llm_analyze(cfg, data, plan, budget=100.0, timeout=150.0, extra_note=""):
     """调用 OpenAI 兼容接口（DeepSeek/OpenAI/Kimi/Qwen 等）做深度分析。
 
     cfg: {api_key, base_url, model}。base_url 形如 https://api.deepseek.com
+    extra_note: 额外上下文（如两队近期战绩/交锋/赔率变化），追加进提示词。
     """
     matches = (data.get("jczq") or {}).get("matches") or []
     brief = []
@@ -748,7 +749,8 @@ def llm_analyze(cfg, data, plan, budget=100.0, timeout=150.0):
             f"竞彩足球（{len(brief)}场）：\n{json.dumps(brief, ensure_ascii=False)}\n"
             f"传统足彩：\n{json.dumps(zucai, ensure_ascii=False)}\n"
             f"内置模型推荐（供参考）：\n{json.dumps(plan, ensure_ascii=False)[:3000]}\n"
-            "请输出 JSON：{\"summary\":\"一句话整体判断\","
+            + (f"补充数据（近期战绩/状态/赔率变化）：\n{extra_note}\n" if extra_note else "")
+            + "请输出 JSON：{\"summary\":\"一句话整体判断\","
             "\"plans\":{\"had\":[{\"match\":\"周六001\",\"pick\":\"胜\",\"stake\":2,\"reason\":\"...\"}],"
             "\"zucai14\":{\"dan\":[1,2],\"double\":[3,4],\"notes\":8},"
             "\"ren9\":[9,10,11,12,13,14,15,16,17],\"ban6\":{},\"goal4\":{}},"

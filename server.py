@@ -41,6 +41,8 @@ SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 
 REFRESH_INTERVAL = 600  # 秒
 MAX_BODY = 1024 * 1024
+ODDS_HISTORY_FILE = os.path.join(CACHE_DIR, "odds_history.jsonl")
+ODDS_HISTORY_LIMIT = 2000  # 保留最近 N 条快照
 
 MIME = {
     ".html": "text/html; charset=utf-8",
@@ -151,6 +153,7 @@ def refresh_data(pref: str | None = None):
             json.dump({"data": data, "updated_at": _state["updated_at"],
                        "source_pref": pref, "plan": _state["plan"]}, f,
                       ensure_ascii=False, indent=1)
+        snapshot_odds(data)
         print(f"[sync] 刷新完成 {time.time() - t0:.1f}s | 竞彩 {len(data['jczq']['matches'])} 场 | "
               f"传统足彩 {len(data['zucai']['issues'])} 个玩法 | 源: "
               f"jczq={data['sources']['jczq']['source']} zucai={data['sources']['zucai']['source']}")
@@ -167,6 +170,96 @@ def _default_budget():
         return float(s.get("budget", 100))
     except (TypeError, ValueError):
         return 100.0
+
+
+# ---------------- 赔率快照记录（初盘→临场变化，价值回测用） ----------------
+
+_last_odds = {}   # mid -> {had:{...}, hhad:{...}}
+_moves = {}       # mid -> {had: {h:{prev,now,dir}, d:{...}, a:{...}}, ...}
+
+
+def snapshot_odds(data):
+    """每次数据刷新后，把当天在售竞彩赔率追加进历史文件，并计算相对上次的变化。"""
+    global _last_odds, _moves
+    matches = (data.get("jczq") or {}).get("matches") or []
+    if not matches:
+        return
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    record = {"ts": ts, "matches": []}
+    moves = {}
+    for m in matches:
+        odds = m.get("odds") or {}
+        had, hhad = odds.get("had"), odds.get("hhad")
+        mid = m.get("id")
+        if not mid:
+            continue
+        entry = {}
+        if isinstance(had, dict):
+            entry["had"] = {k: float(v) for k, v in had.items() if k in ("h", "d", "a") and isinstance(v, (int, float))}
+        if isinstance(hhad, dict):
+            e = {k: float(v) for k, v in hhad.items() if k in ("h", "d", "a") and isinstance(v, (int, float))}
+            if e:
+                entry["hhad"] = e
+        if not entry:
+            continue
+        record["matches"].append({"id": mid, "home": m.get("home"), "away": m.get("away"), "odds": entry})
+        # 变化
+        prev = _last_odds.get(mid, {})
+        md = {}
+        for pool in ("had", "hhad"):
+            cur = entry.get(pool)
+            old = prev.get(pool)
+            if not cur or not old:
+                continue
+            pd = {}
+            for k in ("h", "d", "a"):
+                if k in cur and k in old and old[k] > 0:
+                    d = round((cur[k] - old[k]) / old[k] * 100, 1)
+                    pd[k] = {"prev": old[k], "now": cur[k], "dir": "up" if d > 0.3 else ("down" if d < -0.3 else "flat"),
+                             "pct": d}
+            if pd:
+                md[pool] = pd
+        if md:
+            moves[mid] = md
+    _moves = moves
+    _last_odds = {x["id"]: x["odds"] for x in record["matches"]}
+    try:
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        with open(ODDS_HISTORY_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        # 裁剪文件行数
+        with open(ODDS_HISTORY_FILE, encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > ODDS_HISTORY_LIMIT:
+            with open(ODDS_HISTORY_FILE, "w", encoding="utf-8") as f:
+                f.writelines(lines[-ODDS_HISTORY_LIMIT:])
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def odds_moves():
+    return _moves
+
+
+def odds_history(mid=None, limit=300):
+    out = []
+    if not os.path.exists(ODDS_HISTORY_FILE):
+        return out
+    with open(ODDS_HISTORY_FILE, encoding="utf-8") as f:
+        lines = f.readlines()
+    for ln in lines[-limit:]:
+        try:
+            rec = json.loads(ln)
+        except Exception:  # noqa: BLE001
+            continue
+        if mid:
+            hit = next((x for x in rec.get("matches", []) if x.get("id") == mid), None)
+            if hit:
+                out.append({"ts": rec["ts"], "had": hit["odds"].get("had"),
+                            "hhad": hit["odds"].get("hhad")})
+        else:
+            out.append({"ts": rec["ts"], "count": len(rec.get("matches", []))})
+    return out
 
 
 def load_cache():
@@ -269,6 +362,12 @@ class Handler(BaseHTTPRequestHandler):
             s = load_settings()
             self._json({"ok": True, "budgets": {k: s.get(k, 100 if k == "daily" else 0)
                                                 for k in ("daily", "monthly", "yearly")}})
+        elif p == "/api/odds-moves":
+            self._json({"ok": True, "moves": odds_moves(), "ts": time.strftime("%Y-%m-%d %H:%M:%S")})
+        elif p == "/api/odds-history":
+            mid = parse_qs(u.query).get("mid", [""])[0]
+            self._json({"ok": True, "history": odds_history(mid or None),
+                        "msg": "每10分钟自动记录一次赔率，积累初盘→临场变化，供价值回测"})
         elif not p.startswith("/api/"):
             # 其余静态资源（qr 收款码等图片、前端文件）
             self._serve_static(p[1:] or "index.html")
@@ -355,6 +454,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json(self._do_review(body.get("date", "")))
         elif p == "/api/llm-review":
             self._llm_review(body)
+        elif p == "/api/form":
+            matches = body.get("matches") or []
+            try:
+                forms = sources.fetch_match_forms(matches)
+            except Exception as e:  # noqa: BLE001
+                self._json({"ok": False, "error": f"战绩抓取失败: {e}"})
+                return
+            self._json({"ok": True, "forms": forms})
         elif p == "/api/analyze-today":
             self._analyze_today(body)
         elif p == "/api/llm":
@@ -518,11 +625,50 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "error": "数据尚未就绪，请先刷新"})
             return
         base_plan = engine.build_full_plan(data, budget=daily, mode=mode)
+        # 近期战绩/交锋：从内置方案涉及的场次里取（限6场），带球队ID时才抓
+        forms = []
+        form_note = ""
+        jczq_map = {m.get("id"): m for m in (data.get("jczq") or {}).get("matches", [])}
+        picked = set()
+        for pool in ("had", "ttg", "crs", "hafu"):
+            for p in (base_plan.get("plans", {}).get(pool, {})).get("picks", []):
+                if len(picked) >= 6:
+                    break
+                m = jczq_map.get(p.get("id"))
+                if m and (m.get("home_id") or m.get("away_id")) and p.get("id") not in picked:
+                    picked.add(p.get("id"))
+        if picked:
+            try:
+                ms = [{"home": jczq_map[i]["home"], "away": jczq_map[i]["away"],
+                       "home_id": jczq_map[i].get("home_id"), "away_id": jczq_map[i].get("away_id")}
+                      for i in picked]
+                forms = sources.fetch_match_forms(ms)
+                form_note = "\n".join(
+                    f"{f['home']} vs {f['away']}：\n" + "\n".join(f["text"]) for f in forms if f.get("text"))
+                if form_note:
+                    form_note = "两队近期战绩（近X场 胜平负，最新在前）参考：\n" + form_note
+            except Exception:  # noqa: BLE001
+                forms, form_note = [], ""
         result = {"ok": True, "plan": base_plan,
-                  "allocation": self._allocation({"daily": daily, "monthly": monthly, "yearly": yearly})}
+                  "allocation": self._allocation({"daily": daily, "monthly": monthly, "yearly": yearly}),
+                  "forms": forms, "moves": odds_moves()}
         if cfg.get("api_key"):
-            # DeepSeek 统筹：传结构化比赛/赔率/内置模型与预算，让它补场外因素并给最终分配
-            llm = engine.llm_analyze(cfg, data, base_plan, budget=daily)
+            # DeepSeek 统筹：传结构化比赛/赔率/近期战绩/赔率变化与预算，补场外因素并给最终分配
+            moves_note = ""
+            mv = odds_moves()
+            if mv:
+                lines = []
+                for mid, mm in list(mv.items())[:8]:
+                    bits = []
+                    for pool, d in mm.items():
+                        for k, v in d.items():
+                            bits.append(f"{pool}.{k} {v['prev']}→{v['now']} ({v['dir']})")
+                    if bits:
+                        lines.append(f"{mid}: " + "；".join(bits))
+                if lines:
+                    moves_note = "赔率变化（相对上次刷新）：\n" + "\n".join(lines)
+            extra = "\n".join(x for x in (form_note, moves_note) if x)
+            llm = engine.llm_analyze(cfg, data, base_plan, budget=daily, extra_note=extra)
             result["llm"] = llm
             if llm.get("ok") and isinstance(llm.get("result"), dict):
                 result["llm_plan"] = llm["result"]

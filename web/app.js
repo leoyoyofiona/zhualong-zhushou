@@ -307,6 +307,8 @@ async function loadState() {
   APP.sourcePref = s.source_pref || "auto";
   APP.weights = APP.weights || (s.defaults && s.defaults.weights);
   renderAll();
+  // 赔率变化（初盘→临场）非阻塞拉取，用于卡片箭头
+  api("/api/odds-moves").then(r => { APP.moves = r.moves || {}; renderCards(); }).catch(() => { APP.moves = {}; });
 }
 
 async function recomputePlan() {
@@ -631,12 +633,22 @@ function optHtml(pool, m, o, manual) {
   const pick = (APP.planLookup[pool] || {})[keyOf(m.id, o.option)];
   const rec = !manual && !!(pick && pick.recommended);
   const sel = (APP.sel[pool] || new Map()).has(keyOf(m.id, o.option));
+  // 赔率变化箭头（had/hhad 三路：h→胜,d→平,a→负）
+  let moveHtml = "";
+  if ((pool === "had" || pool === "hhad") && APP.moves && APP.moves[m.id] && APP.moves[m.id][pool]) {
+    const kMap = { 胜: "h", 平: "d", 负: "a" };
+    const mv = APP.moves[m.id][pool][kMap[o.option]];
+    if (mv && mv.dir !== "flat") {
+      const hot = mv.dir === "down"; // 赔率下降=受热
+      moveHtml = `<span class="mover ${hot ? "hot" : "cold"}">${hot ? "▼" : "▲"}${Math.abs(mv.pct).toFixed(1)}%</span>`;
+    }
+  }
   const tags = !manual && pick && pick.tags ? pick.tags.map(t => `<span class="tag ${t}">${t}</span>`).join("") : "";
   const label = pool === "ttg" ? o.option + "球" : o.option;
   const cls = ["opt", rec ? "rec" : "", sel ? "sel" : ""].join(" ");
   return `<button class="${cls}" data-pool="${pool}" data-mid="${esc(m.id)}" data-opt="${esc(o.option)}" data-odds="${o.odds}"
       title="概率 ${pick && !manual ? Math.round(pick.prob * 100) : "?"}%">${rec ? "<span class='tags'>" + tags + "</span>" : ""}
-      <span class="o">${esc(label)}</span><span class="ov">${fmt(o.odds)}</span></button>`;
+      <span class="o">${esc(label)}</span><span class="ov">${fmt(o.odds)}${moveHtml}</span></button>`;
 }
 
 function renderCombos(pool, combos) {
@@ -1373,6 +1385,22 @@ function renderAnalyzeResult(r) {
     const spent = pl.spent || (pl.ticket ? pl.ticket.stake : 0) || 0;
     if (spent > 0) html += `<div style="font-size:12px">· ${esc(pl.label)}：约 ${fmt(spent)} 元</div>`;
   }
+  if (r.forms && r.forms.length) {
+    html += "<h4>📈 近期战绩（500 liansai 实时）</h4>";
+    for (const f of r.forms) {
+      if (!f.text || !f.text.length) continue;
+      html += `<div style="font-size:12px;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin-bottom:6px"><b>${esc(f.home)} vs ${esc(f.away)}</b><br>${f.text.map(esc).join("<br>")}</div>`;
+    }
+  }
+  if (r.moves && Object.keys(r.moves).length) {
+    html += "<h4>📉 赔率变化（相对上次采样）</h4>";
+    for (const [mid, mm] of Object.entries(r.moves).slice(0, 8)) {
+      const bits = [];
+      for (const [pool, d] of Object.entries(mm)) for (const [k, v] of Object.entries(d))
+        bits.push(`${pool === "hhad" ? "让球" : "胜平负"}.${k} ${v.prev}→${v.now} (${v.dir === "down" ? "↓热" : v.dir === "up" ? "↑冷" : "平"})`);
+      if (bits.length) html += `<div style="font-size:11px;color:var(--dim)">${esc(mid)}：${bits.map(esc).join("；")}</div>`;
+    }
+  }
   if (r.llm) {
     html += "<h4>🤖 DeepSeek 统筹建议</h4>";
     if (r.llm.ok) {
@@ -1654,6 +1682,24 @@ function handleDdAction(action) {
   }
 }
 
+function applyTheme(pref) {
+  // pref: "auto" | "light" | "dark"
+  const dark = pref === "dark" || (pref !== "light" && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+  const icon = pref === "dark" ? "🌙" : pref === "light" ? "☀️" : "🌓";
+  const b = $("btn-theme");
+  if (b) b.textContent = icon;
+}
+
+function cycleTheme() {
+  const cur = APP.settings.theme || "auto";
+  const next = cur === "auto" ? "light" : cur === "light" ? "dark" : "auto";
+  APP.settings.theme = next;
+  try { localStorage.setItem("zucai_settings", JSON.stringify(APP.settings)); } catch (e) {}
+  applyTheme(next);
+  toast(next === "auto" ? "主题：跟随系统" : next === "light" ? "主题：浅色" : "主题：深色");
+}
+
 function bindEvents() {
   renderWorksMenu();
   // 下拉菜单：鼠标悬停由 CSS 控制(.dd:hover)；LEO作品菜单支持点击切换(触屏)
@@ -1692,6 +1738,7 @@ function bindEvents() {
   $("btn-settings").onclick = openSettings;
   $("btn-history").onclick = openHistory;
   $("btn-review").onclick = openReview;
+  $("btn-theme").onclick = cycleTheme;
   $("btn-save-settings").onclick = saveSettings;
   $("btn-llm-test").onclick = llmTest;
   $("btn-alloc").onclick = showAllocation;
@@ -1929,6 +1976,13 @@ async function init() {
   APP.budget = budget;
   $("budget-slider").value = Math.min(200, Math.max(50, budget));
   $("budget-num").value = budget;
+  // 主题：跟随设置（默认自动=系统深浅）
+  applyTheme(APP.settings.theme || "auto");
+  if (window.matchMedia) {
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if ((APP.settings.theme || "auto") === "auto") applyTheme("auto");
+    });
+  }
   // 手机端投注单默认收起，避免占太多屏幕
   if (window.innerWidth < 900) {
     APP.slipCollapsed = true;

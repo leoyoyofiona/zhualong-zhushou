@@ -377,3 +377,98 @@ main { padding: 16px 20px 80px; max-width: 1600px; margin: 0 auto; }
   .dd-works { width: 88vw; }
   .coffee .qr img { width: 110px; height: 110px; }
 }
+
+/* ================ 主题系统：浅色(默认) / 深色 / 玻璃拟态 ================ */
+html { color-scheme: light; }
+html[data-theme="dark"] { color-scheme: dark; }
+
+/* 玻璃拟态：让卡片/面板半透明并模糊背景，配合柔和渐变底色 */
+body {
+  background: linear-gradient(160deg, #eef2f9 0%, #e7edf7 40%, #f4f0fa 100%) fixed;
+}
+html[data-theme="dark"] body {
+  background: linear-gradient(160deg, #0b1220 0%, #101a30 45%, #150f26 100%) fixed;
+}
+.sticky-head, .budget-bar, .card, .slip-panel, .modal-box, .dd-panel,
+.rate-panel, .pass-box, .ticket-line, .llm-result {
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+.sticky-head { background: rgba(255,255,255,.82); }
+.budget-bar { background: rgba(255,255,255,.60); }
+.card { background: rgba(255,255,255,.72); box-shadow: 0 8px 30px rgba(15,23,42,.06); }
+.card-head { background: rgba(240,243,249,.55); }
+.slip-panel { background: rgba(255,255,255,.88); }
+.modal-box { background: rgba(255,255,255,.93); }
+.dd-panel { background: rgba(255,255,255,.92); }
+.rate-panel { background: linear-gradient(90deg, rgba(239,246,255,.8), rgba(248,250,252,.6)); }
+.pass-box { background: rgba(240,247,255,.8); }
+.card2, .opt { backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+
+/* 深色主题变量与覆盖 */
+html[data-theme="dark"] {
+  --bg: #0b1220; --bg2: #101a2c; --card: rgba(20,28,44,.78); --card2: rgba(30,40,60,.65);
+  --line: #26334d; --text: #e6ecf7; --dim: #93a1bd;
+  --accent: #3b82f6; --accent2: #22c55e; --warn: #f59e0b; --danger: #ef4444; --gold: #fbbf24;
+  --rec: rgba(59,130,246,.18); --sel: rgba(34,197,94,.22);
+}
+html[data-theme="dark"] body { color: #e6ecf7; }
+html[data-theme="dark"] .sticky-head { background: rgba(11,18,32,.8); }
+html[data-theme="dark"] .topbar { border-color: #26334d; }
+html[data-theme="dark"] .budget-bar { background: rgba(16,26,44,.65); }
+html[data-theme="dark"] .card { background: rgba(20,28,44,.72); box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+html[data-theme="dark"] .card-head { background: rgba(30,40,60,.55); border-color: #26334d; }
+html[data-theme="dark"] .card-body, html[data-theme="dark"] .mrow { border-color: #26334d; }
+html[data-theme="dark"] .slip-panel { background: rgba(15,22,38,.92); }
+html[data-theme="dark"] .modal-box { background: rgba(18,26,44,.96); }
+html[data-theme="dark"] .dd-panel { background: rgba(20,28,44,.96); }
+html[data-theme="dark"] .dd-item:hover { background: rgba(59,130,246,.18); color: #93c5fd; }
+html[data-theme="dark"] .btn { background: rgba(30,40,60,.7); color: #e6ecf7; }
+html[data-theme="dark"] .opt { background: rgba(30,40,60,.55); color: #e6ecf7; }
+html[data-theme="dark"] .opt.sel { background: #16a34a; }
+html[data-theme="dark"] .opt.rec { background: rgba(59,130,246,.22); }
+html[data-theme="dark"] .chip { background: rgba(30,40,60,.5); color: #93a1bd; }
+html[data-theme="dark"] .chip.on { background: #2563eb; color: #fff; }
+html[data-theme="dark"] .rate-panel { background: linear-gradient(90deg, rgba(30,58,90,.5), rgba(23,33,55,.4)); border-color: #26334d; }
+html[data-theme="dark"] .rate-panel .rp-bar { background: #26334d; }
+html[data-theme="dark"] .pass-box { background: rgba(30,58,90,.5); border-color: #26334d; }
+html[data-theme="dark"] .ticket-line { background: rgba(30,40,60,.5); }
+html[data-theme="dark"] .work-card { background: linear-gradient(180deg, rgba(30,40,60,.7), rgba(20,28,44,.7)); border-color: #26334d; }
+html[data-theme="dark"] .work-links a { background: rgba(59,130,246,.2); color: #93c5fd; }
+html[data-theme="dark"] .coffee { background: linear-gradient(120deg, rgba(120,80,20,.35), rgba(90,60,110,.35)); border-color: rgba(245,158,11,.4); }
+html[data-theme="dark"] .coffee h3, html[data-theme="dark"] .coffee .qr span { color: #fcd34d; }
+html[data-theme="dark"] .coffee p { color: #d9b45c; }
+html[data-theme="dark"] .disclaimer { background: linear-gradient(90deg, rgba(120,70,20,.35), rgba(110,80,30,.3)); color: #fde68a; border-color: rgba(245,158,11,.4); }
+html[data-theme="dark"] .disclaimer .d-title, html[data-theme="dark"] .disclaimer .d-body b { color: #fbbf24; }
+html[data-theme="dark"] .src-badge { background: rgba(30,40,60,.6); }
+html[data-theme="dark"] .hstats .hs { background: rgba(30,40,60,.6); }
+html[data-theme="dark"] .htable th { background: #141c2c; }
+html[data-theme="dark"] input, html[data-theme="dark"] select {
+  background: #101a2c; color: #e6ecf7; border-color: #26334d;
+}
+html[data-theme="dark"] .slip-item .t b { color: #e6ecf7; }
+html[data-theme="dark"] .modal-close { color: #93a1bd; }
+html[data-theme="dark"] .field input, html[data-theme="dark"] .weights-grid input { background: #101a2c; }
+html[data-theme="dark"] .banner.warn { background: rgba(245,158,11,.12); }
+html[data-theme="dark"] .banner.err { background: rgba(239,68,68,.12); }
+html[data-theme="dark"] .llm-result { background: rgba(16,26,44,.7); }
+html[data-theme="dark"] .pass-match.on { background: rgba(34,197,94,.16); }
+html[data-theme="dark"] .rate-panel .rp-prize, html[data-theme="dark"] .slip-prize { color: #fbbf24; }
+html[data-theme="dark"] .rate-panel .rp-prize b, html[data-theme="dark"] .slip-prize b { color: #fbbf24; }
+html[data-theme="dark"] .footer { color: #64748b; }
+html[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #26334d; }
+
+/* 深色下成功率/标签对比微调 */
+html[data-theme="dark"] .tag.首选 { background: #2563eb; }
+html[data-theme="dark"] .tag.稳胆 { background: #d97706; }
+html[data-theme="dark"] .opt .ov { color: #7d8ca8; }
+html[data-theme="dark"] .opt.sel .ov { color: #fff; }
+
+/* 主题切换按钮 */
+#btn-theme { min-width: 34px; }
+
+/* 赔率变化标记 */
+.mover { font-size: 9px; margin-left: 2px; font-weight: 700; }
+.mover.hot { color: #dc2626; }   /* 赔率下降=受热，红跌 */
+.mover.cold { color: #16a34a; }  /* 赔率上升=走冷，绿升 */
+html[data-theme="dark"] .mover.hot { color: #f87171; }
+html[data-theme="dark"] .mover.cold { color: #4ade80; }

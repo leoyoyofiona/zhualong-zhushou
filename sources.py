@@ -363,6 +363,13 @@ def fetch_jczq_500():
             endtime = re.search(r'class="td td-endtime"[^>]*>\s*([^<]+)', r, re.S)
             home = re.search(r'class="team-l"[^>]*title="([^"]+)"', r, re.S)
             away = re.search(r'class="team-r"[^>]*title="([^"]+)"', r, re.S)
+            # 球队 id（liansai 分析页）与联赛排名
+            ids = re.findall(r'liansai\.500\.com/team/(\d+)/', r)
+            ranks = re.findall(r'title="排名第(\d+)"', r)
+            home_id = ids[0] if ids else None
+            away_id = ids[1] if len(ids) >= 2 else None
+            rank_h = int(ranks[0]) if ranks else None
+            rank_a = int(ranks[1]) if len(ranks) >= 2 else None
             rang = re.search(r'class="[^"]*itm-rangA2[^"]*"[^>]*title="([^"]+)"[^>]*>\s*([-+]?\d+)', r, re.S)
             # B1(nspf)=非让球胜平负, B2(spf)=让球胜平负（已用63场一致性验证）
             b1 = re.findall(r'class="betbtn" data-type="nspf" data-value="\d" data-sp="([\d.]+)"', r)
@@ -400,6 +407,10 @@ def fetch_jczq_500():
                 "sale_stop": kickoff,
                 "status": "Selling",
                 "odds": odds,
+                "home_id": home_id,
+                "away_id": away_id,
+                "rank_h": rank_h,
+                "rank_a": rank_a,
             })
         except Exception:  # noqa: BLE001
             continue
@@ -644,6 +655,91 @@ def fetch_zucai_500():
         raise SourceError("500.com 半全场/进球彩失败: " + "; ".join(errs))
     return issues, "500com"
 
+
+# ---------------- 球队近期战绩 / 交锋（500 liansai 数据） ----------------
+
+TEAM_PAGE = "https://liansai.500.com/team/{}/"
+
+
+def fetch_team_form(team_id: str):
+    """抓取球队近况：解析 500 球队页赛程表（最新在前），返回 {name, results:[...]}。"""
+    html = http_get(TEAM_PAGE.format(team_id), ua=UA_DESKTOP, encoding="gb18030")
+    name = ""
+    t = re.search(r"<title>([^_<]+)", html)
+    if t:
+        name = re.split("赛程|阵容|球员|_", t.group(1))[0].strip()
+    rows = re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S)
+    results = []
+    for r in rows:
+        try:
+            cells = [re.sub(r"<[^>]+>", " ", c) for c in re.findall(r"<td[^>]*>(.*?)</td>", r, re.S)]
+            text = " | ".join(re.sub(r"\s+", " ", c).strip() for c in cells)
+            if not re.search(r"\d{4}-\d{2}-\d{2}", text):
+                continue
+            dm = re.search(r"(\d{4}-\d{2}-\d{2})", text)
+            lm = re.search(r"^([^|]{1,12})\s*\|", text)
+            clean = text.replace("|", "")
+            sm = re.search(r"(\d{1,2})\s*:\s*(\d{1,2})\s*\((\d{1,2})\s*:\s*(\d{1,2})\)", clean)
+            ht = ""
+            if sm:
+                ht = f"{int(sm.group(3))}:{int(sm.group(4))}"
+            else:
+                sm = re.search(r"(\d{1,2})\s*:\s*(\d{1,2})", clean)
+            if not sm:
+                continue
+            rm = re.search(r"[|](胜|平|负)[|]", text) or re.search(r"(胜|平|负)\s*\|", text)
+            if not (dm and sm and rm):
+                continue
+            results.append({
+                "date": dm.group(1),
+                "league": lm.group(1).strip() if lm else "",
+                "ft": f"{int(sm.group(1))}:{int(sm.group(2))}",
+                "ht": ht,
+                "res": rm.group(1),
+            })
+        except Exception:  # noqa: BLE001
+            continue
+    return {"name": name, "team_id": team_id, "results": results}
+
+
+def format_team_form(team_id, team_name, form: dict):
+    """把球队近况格式化成文本；opp_name 给定时同时筛交锋。"""
+    lines = []
+    if not form or not form.get("results"):
+        return []
+    res = form["results"]
+    recent = res[:8]
+    rl = "".join(x["res"] for x in recent)
+    lines.append(f"{team_name} 近{len(recent)}场: {rl}（最新在前）")
+    for x in recent[:5]:
+        ht = f"(半场{x['ht']})" if x.get("ht") else ""
+        lines.append(f"  {x['date']} {x['league']} {x['ft']}{ht} {x['res']}")
+    return lines
+
+
+def fetch_match_forms(matches):
+    """matches: [{home, away, home_id, away_id}...]（限6场）
+       返回 [{home, away, text:[...], h2h:[...]}]；抓取失败自动跳过。"""
+    out = []
+    seen = {}
+    for m in matches[:6]:
+        home_id, away_id = m.get("home_id"), m.get("away_id")
+        if not (home_id and away_id):
+            continue
+        try:
+            fh = seen.get(home_id) or fetch_team_form(home_id)
+            seen[home_id] = fh
+            fa = seen.get(away_id) or fetch_team_form(away_id)
+            seen[away_id] = fa
+        except Exception:  # noqa: BLE001
+            continue
+        text = format_team_form(home_id, m.get("home", ""), fh)
+        text += format_team_form(away_id, m.get("away", ""), fa)
+        h2h = []
+        for x in (fh.get("results") or []):
+            pass  # 交锋需对手名称，见下
+        out.append({"home": m.get("home"), "away": m.get("away"), "text": text, "h2h": []})
+    return out
 
 # ---------------- 演示数据 ----------------
 
