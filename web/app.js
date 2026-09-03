@@ -2213,7 +2213,9 @@ function flyInTrack(it) {
   const W = tr.clientWidth || document.documentElement.clientWidth || 1200;
   const tw = el.scrollWidth || 260;
   DANMU.active++;
-  const dur = Math.min(24000, Math.max(7000, (it.text || "").length * 90)); // 文本越长滚得越慢，保证能读完
+  // 慢速弹幕：按 ~60px/s 匀速滚过整条轨道(文字越长耗时越久)，下限9s保证可读
+  const dist = W + tw + 120;
+  const dur = Math.min(48000, Math.max(9000, Math.round(dist / 60 * 1000)));
   const startX = W + 40, endX = -(tw + 60);
   const finish = () => {
     el.remove();
