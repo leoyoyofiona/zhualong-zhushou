@@ -2206,8 +2206,13 @@ function flyInTrack(it) {
   if (idle) idle.style.display = "none";   // 有弹幕时不显示占位提示
   const el = document.createElement("div");
   el.className = "danmu-fly";
+  el.dataset.mid = it.id;
   const color = FLY_COLORS[(it.nick || "").length % FLY_COLORS.length];
-  el.innerHTML = `<span class="df-nick">${esc(it.nick)}</span> ${esc(it.text)}`;
+  const liked = DANMU.liked.has(it.id);
+  const n = Number(it.likes) || 0;
+  // 弹幕结构：昵称 + 文字 + 点赞(👍数量，悬停时放大会拇指)。liked 表示本浏览器已赞过
+  el.innerHTML = `<span class="df-nick">${esc(it.nick)}</span><span class="df-txt">${esc(it.text)}</span>
+    <button class="df-like${liked ? " liked" : ""}" data-like="${esc(it.id)}" title="点👍给这条建议点赞">👍 <b>${n}</b></button>`;
   el.style.background = color;
   tr.appendChild(el);
   const W = tr.clientWidth || document.documentElement.clientWidth || 1200;
@@ -2223,8 +2228,9 @@ function flyInTrack(it) {
     // 兜底：万一动画没触发也释放计数
     setTimeout(() => { if (!el.isConnected) DANMU.active = Math.max(0, DANMU.active - 1); }, 200);
   };
+  let anim = null;
   if (typeof el.animate === "function") {
-    const anim = el.animate(
+    anim = el.animate(
       [{ transform: `translateX(${startX}px)` }, { transform: `translateX(${endX}px)` }],
       { duration: dur, easing: "linear" }
     );
@@ -2237,6 +2243,52 @@ function flyInTrack(it) {
     setTimeout(() => { el.style.transform = `translateX(${endX}px)`; }, 20);
     setTimeout(finish, dur + 200);
   }
+  // 悬停暂停：鼠标放上弹幕 -> 停下，👍放大可点赞；移开继续滚动
+  el.addEventListener("pointerenter", () => {
+    if (anim) anim.pause();
+    el.classList.add("fly-hover");
+  });
+  el.addEventListener("pointerleave", () => {
+    if (anim) anim.play();
+    el.classList.remove("fly-hover");
+  });
+  el.addEventListener("click", (e) => {
+    const likeBtn = e.target.closest(".df-like");
+    if (!likeBtn) return;
+    likeDanmu(it.id, likeBtn, el);
+  });
+}
+
+/* 弹幕点赞：乐观更新(点击立即加赞+弹拇指)，后端失败自动回滚 */
+function likeDanmu(id, btn, flyEl) {
+  if (btn.classList.contains("liked")) { toast("你已经点过赞啦"); return; }
+  const b = btn.querySelector("b");
+  const oldN = Number(b ? b.textContent : 0) || 0;
+  // 立即反馈：+1、变已赞、弹大拇指
+  btn.classList.add("liked");
+  if (b) b.textContent = oldN + 1;
+  const pop = document.createElement("span");
+  pop.className = "df-pop";
+  pop.textContent = "👍";
+  (flyEl || btn).appendChild(pop);
+  setTimeout(() => { try { pop.remove(); } catch (e) {} }, 1100);
+  api("/api/suggestions/like", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }) }).then(r => {
+    if (r && r.ok) {
+      DANMU.liked.add(id);
+      try { localStorage.setItem("zucai_danmu_liked", JSON.stringify([...DANMU.liked])); } catch (e) {}
+      if (b) b.textContent = Number(r.likes) || oldN + 1;
+      toast("👍 已点赞");
+    } else {
+      btn.classList.remove("liked");
+      if (b) b.textContent = oldN;
+      toast((r && r.error) || "点赞失败");
+    }
+  }).catch(e => {
+    btn.classList.remove("liked");
+    if (b) b.textContent = oldN;
+    toast("点赞失败：" + e.message);
+  });
 }
 
 function timeFmt(t) {

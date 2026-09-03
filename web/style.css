@@ -563,20 +563,46 @@ html[data-theme="dark"] .tag-invest { background: #22c55e; color: #052e16; }
 
 /* 顶部弹幕轨道：固定在页面最上方一行，建议一条接一条从右往左循环滚过 */
 .danmu-track {
-  position: relative; height: 40px; overflow: hidden; pointer-events: none;
+  position: relative; height: 44px; overflow: hidden; pointer-events: auto;
   background: linear-gradient(90deg, #0f172a, #1e3a8a); color: #fff;
   z-index: 90; display: flex; align-items: center;
 }
 html[data-theme="dark"] .danmu-track { background: linear-gradient(90deg, #020617, #1e3a8a); }
-.danmu-idle { font-size: 13px; color: rgba(255,255,255,.8); white-space: nowrap; padding-left: 16px; }
+.danmu-idle { font-size: 13px; color: rgba(255,255,255,.8); white-space: nowrap; padding-left: 16px; pointer-events: none; }
 .danmu-track .danmu-fly {
   flex: none; white-space: nowrap; color: #fff; font-size: 14px; line-height: 1.4;
   border-radius: 999px; padding: 4px 16px; margin-left: 8px;
   box-shadow: 0 2px 10px rgba(15,23,42,.3); font-weight: 600;
-  text-shadow: 0 1px 2px rgba(0,0,0,.25); pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0,0,0,.25); pointer-events: auto;
   will-change: transform; position: relative;
 }
 .danmu-track .danmu-fly .df-nick { color: #fde68a; font-weight: 800; margin-right: 6px; }
+.danmu-track .danmu-fly .df-txt { margin-right: 6px; }
+/* 弹幕点赞按钮：平时小巧(👍n)，悬停暂停时放大大拇指可点 */
+.danmu-track .danmu-fly .df-like {
+  border: none; cursor: pointer; font: inherit; font-weight: 700; color: #fff;
+  background: rgba(255,255,255,.16); border-radius: 999px; padding: 1px 8px;
+  line-height: 1.5; transition: transform .12s, background .12s; pointer-events: auto;
+  display: inline-flex; align-items: center; gap: 2px; flex: none;
+}
+.danmu-track .danmu-fly .df-like:hover { background: rgba(255,255,255,.32); }
+.danmu-track .danmu-fly .df-like.liked { background: rgba(255,255,255,.28); color: #fde68a; }
+.danmu-track .danmu-fly.fly-hover .df-like {
+  transform: scale(1.45); background: rgba(255,255,255,.92); color: #b45309;
+  box-shadow: 0 3px 12px rgba(0,0,0,.3);
+}
+.danmu-track .danmu-fly.fly-hover .df-like.liked { background: #fde68a; color: #92400e; }
+/* 点👍后弹出的大拇指动画 */
+.danmu-track .danmu-fly .df-pop {
+  position: absolute; right: -14px; top: -26px; font-size: 34px; pointer-events: none;
+  animation: dfPop 1.05s ease-out forwards; text-shadow: 0 2px 8px rgba(0,0,0,.35);
+}
+@keyframes dfPop {
+  0%   { transform: translateY(0) scale(.3); opacity: 0; }
+  25%  { opacity: 1; }
+  60%  { transform: translateY(-34px) scale(1.35); opacity: 1; }
+  100% { transform: translateY(-74px) scale(.9); opacity: 0; }
+}
 
 /* 右下角悬浮入口按钮 */
 .danmu-wrap { position: fixed; right: 16px; bottom: 16px; z-index: 400; }
