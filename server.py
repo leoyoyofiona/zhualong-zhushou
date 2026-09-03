@@ -386,12 +386,13 @@ class Handler(BaseHTTPRequestHandler):
             budget = float(body.get("budget", 100) or 100)
             weights = body.get("weights")
             mode = body.get("mode", "normal")
+            curated = bool(body.get("curated", False))
             with _state_lock:
                 data = _state["data"]
             if not data:
                 self._json({"ok": False, "error": "数据尚未就绪，请先刷新"})
                 return
-            plan = engine.build_full_plan(data, budget=budget, weights=weights, mode=mode)
+            plan = engine.build_full_plan(data, budget=budget, weights=weights, mode=mode, curated=curated)
             self._json({"ok": True, "plan": plan})
         elif p == "/api/bet":
             self._save_bet(body)
@@ -624,7 +625,7 @@ class Handler(BaseHTTPRequestHandler):
         if not data:
             self._json({"ok": False, "error": "数据尚未就绪，请先刷新"})
             return
-        base_plan = engine.build_full_plan(data, budget=daily, mode=mode)
+        base_plan = engine.build_full_plan(data, budget=daily, mode=mode, curated=True)
         # 近期战绩/交锋：从内置方案涉及的场次里取（限6场），带球队ID时才抓
         forms = []
         form_note = ""

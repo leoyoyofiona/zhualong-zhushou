@@ -837,16 +837,16 @@ function applyAllRecs() {
 async function applyAllRecsConfident() {
   const btn = $("btn-apply-all");
   const old = btn.textContent;
-  btn.textContent = "⏳ 计算最有把握方案…"; btn.disabled = true;
+  btn.textContent = "⏳ 计算最优组合…"; btn.disabled = true;
   try {
     const r = await api("/api/plan", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ budget: APP.budget, weights: APP.weights, mode: "confident" }),
+      body: JSON.stringify({ budget: APP.budget, weights: APP.weights, mode: "confident", curated: true }),
     });
     if (r.ok && r.plan) {
       APP.plan = r.plan;
       applyAllRecs();
-      toast("已按『最有把握』模式生成推荐方案");
+      toast("已按『精选组合』生成方案：预算优先投向最有价值的玩法");
     } else toast("推荐失败：" + (r.error || "请重试"));
   } catch (e) { toast("推荐失败：" + e.message); }
   btn.textContent = old; btn.disabled = false;
@@ -1398,7 +1398,7 @@ async function analyzeToday() {
     const budgets = readBudgets();
     const r = await api("/api/analyze-today", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...llmCfg(), daily: budgets.daily, monthly: budgets.monthly, yearly: budgets.yearly }),
+      body: JSON.stringify({ ...llmCfg(), daily: budgets.daily, monthly: budgets.monthly, yearly: budgets.yearly, curated: true }),
     });
     if (!r.ok) { out.innerHTML = `<div class="err">❌ ${esc(r.error)}</div>`; return; }
     APP._lastAnalyze = r;
@@ -1446,20 +1446,23 @@ function prettyLLM(lr) {
 
 function renderAnalyzeResult(r) {
   const out = $("analyze-out");
-  const alloc = (r.allocation && r.allocation.allocation) || {};
+  const allocMap = (r.plan && r.plan.allocs) || {};
   const adv = (r.allocation && r.allocation.advice) || [];
   const hasLlm = !!(r.llm && r.llm.ok);
   let html = "";
   // ① 最终结论框
   const llmSummary = r.llm && r.llm.ok && r.llm.result && r.llm.result.summary;
-  html += `<div class="final-box"><b>🎯 今日方案结论</b><br>
-    预算 ${fmt(r.plan.budget)} 元 → 内置模型方案 ${fmt(r.plan.total_recommended)} 元
+  const strategy = r.plan.strategy ? `<div style="margin-top:4px;font-size:12px;white-space:pre-line">${esc(r.plan.strategy)}</div>` : "";
+  html += `<div class="final-box"><b>🎯 今日方案结论</b>${strategy}<br>
+    预算 ${fmt(r.plan.budget)} 元 → 精选组合方案 ${fmt(r.plan.total_recommended)} 元
     ${hasLlm ? " + DeepSeek 统筹（见下方 🤖）" : "（未填 DeepSeek Key，仅内置引擎；设置里填 Key 后可获得 AI 统筹）"}
     ${llmSummary ? `<div style="margin-top:4px">📌 ${esc(llmSummary)}</div>` : ""}
     <div style="margin-top:4px;color:var(--dim);font-size:12px">点底部"✅ 采用此方案进投注单"把方案装入投注单 → 复制文本/生成截图发彩票店。</div></div>`;
   // ② 资金分配
   html += "<h4>① 资金分配（按日预算）</h4><table class='htable' style='margin-bottom:8px'><tr><th>玩法</th><th>分配(元)</th></tr>";
-  for (const [k, v] of Object.entries(alloc.daily || {})) html += `<tr><td>${esc(POOL_CN[k] || k)}</td><td>${fmt(v)}</td></tr>`;
+  const allocEntries = Object.keys(allocMap).length ? allocMap
+    : (((r.allocation || {}).allocation || {}).daily || {});
+  for (const [k, v] of Object.entries(allocEntries)) html += `<tr><td>${esc(POOL_CN[k] || k)}</td><td>${fmt(v)}</td></tr>`;
   html += "</table><div style='font-size:11px;color:var(--dim)'>" + adv.map(esc).join("<br>") + "</div>";
   // ③ 内置方案明细
   html += `<h4>② 内置模型方案（${fmt(r.plan.total_recommended)} 元）</h4>`;

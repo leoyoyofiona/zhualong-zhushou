@@ -655,29 +655,78 @@ def allocate(budget, weights):
     return {k: round(budget * w, 2) for k, w in weights.items()}
 
 
-def build_full_plan(data, budget=100.0, weights=None, mode="normal"):
+POOL_ROLE = {
+    "had": "主战场·胜平负", "ttg": "模型化·总进球", "crs": "娱乐·比分", "hafu": "娱乐·半全场",
+    "zucai14": "大奖·胜负彩", "ren9": "性价比·任选9场", "ban6": "娱乐·6场半全场", "goal4": "娱乐·4场进球",
+}
+
+
+def curated_pools(budget):
+    """根据预算规模选出值得投入的玩法组合（钱花在刀刃上，不强制均摊到每个玩法）：
+    低预算只投主战场；预算越大逐步加入任九/模型化玩法；纯娱乐玩法最后才考虑。
+    """
+    if budget < 30:
+        return ["had"]
+    if budget < 55:
+        return ["had", "ttg"]
+    if budget < 90:
+        return ["had", "ttg", "ren9"]
+    if budget < 150:
+        return ["had", "ttg", "hafu", "ren9"]
+    return ["had", "ttg", "crs", "hafu", "ren9", "zucai14", "ban6", "goal4"]
+
+
+def build_full_plan(data, budget=100.0, weights=None, mode="normal", curated=False):
     weights = weights or DEFAULT_WEIGHTS
+    if curated:
+        chosen = curated_pools(budget)
+        sub = {k: weights[k] for k in chosen if k in weights}
+        s = sum(sub.values()) or 1.0
+        weights = {k: v / s for k, v in sub.items()}
     allocs = allocate(budget, weights)
     plans = plan_jczq_singles(data, weights, budget, mode=mode)
     issues = (data.get("zucai") or {}).get("issues") or []
     for gno, fn in ((85, plan_zucai14), (86, plan_ren9), (87, plan_ban6), (88, plan_goal4)):
         issue = next((i for i in issues if i.get("game_no") == gno), None)
         key = {85: "zucai14", 86: "ren9", 87: "ban6", 88: "goal4"}[gno]
-        if issue:
-            plans[key] = fn(issue, allocs.get(key, 5.0), mode=mode)
-        else:
+        if not issue:
             plans[key] = {"pool": key, "label": POOL_NAMES[key], "issue": "", "picks": [],
                           "ticket": None, "error": "无在售期"}
+        elif curated and key not in chosen:
+            plans[key] = {"pool": key, "label": POOL_NAMES[key], "issue": issue.get("issue", ""),
+                          "picks": [], "ticket": None, "spent": 0,
+                          "note": "预算有限：优先投向核心玩法，本轮未分配"}
+        else:
+            plans[key] = fn(issue, allocs.get(key, 5.0), mode=mode)
+    if curated:
+        for key, pl in plans.items():
+            if key not in chosen:
+                for p in pl.get("picks", []):
+                    p["recommended"] = False
+                    p["stake"] = 0
+                pl["spent"] = 0
+                pl["ticket"] = None
+                pl["note"] = pl.get("note") or "预算有限：本轮未分配金额（纯娱乐/低性价比玩法）"
     total = sum(p.get("spent") or (p.get("ticket") or {}).get("stake", 0) or 0 for p in plans.values())
-    return {
+    result = {
         "generated_at": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "budget": budget,
         "mode": mode,
+        "curated": curated,
         "allocs": allocs,
         "plans": plans,
         "total_recommended": round(total, 2),
         "disclaimer": "概率模型仅供参考，彩票为负期望游戏，请理性购彩、量力而行。",
     }
+    if curated:
+        excluded = [k for k in POOL_ROLE if k not in chosen]
+        lines = [f"预算 {budget:.0f} 元 → 精选玩法：{'、'.join(POOL_ROLE[k] for k in chosen)}。",
+                 "理由：低抽水/可价值分析的主战场优先；任九性价比高；纯娱乐玩法(比分/半全场/进球彩/6场半全场)命中率低、方差大，仅在预算充足时小注。"]
+        if excluded:
+            lines.append("本轮未投入：" + "、".join(POOL_ROLE[k] for k in excluded) + "。")
+        lines.append(f"方案合计 {total:.2f} 元，占预算 {total / max(budget, 1) * 100:.0f}%，其余为资金冗余/预留。")
+        result["strategy"] = "\n".join(lines)
+    return result
 
 
 # ---------------- 可选大模型分析 ----------------
