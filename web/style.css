@@ -532,3 +532,28 @@ html[data-theme="dark"] .slip-ticket .tkt-top { border-color: #cbd5e1; }
 html[data-theme="dark"] .slip-ticket .tkt-prize { color: #fbbf24; border-color: #26334d; }
 html[data-theme="dark"] .slip-ticket .tkt-edit-row, html[data-theme="dark"] .slip-ticket .tkt-date { color: #7d8ca8; }
 html[data-theme="dark"] .slip-ticket .tkt-edit-row .st { background: #101a2c; border-color: #26334d; color: #e6ecf7; }
+
+/* 方案投入卡片高亮：一眼看出推荐投哪些玩法 */
+.card.invest {
+  border-color: #16a34a;
+  box-shadow: 0 0 0 2px rgba(22,163,74,.55), 0 10px 34px rgba(22,163,74,.18);
+  background: linear-gradient(160deg, rgba(240,253,244,.9), rgba(255,255,255,.75));
+}
+html[data-theme="dark"] .card.invest {
+  border-color: #22c55e;
+  box-shadow: 0 0 0 2px rgba(34,197,94,.6), 0 10px 34px rgba(34,197,94,.22);
+  background: linear-gradient(160deg, rgba(20,60,38,.55), rgba(20,28,44,.78));
+}
+.card.invest .card-head { background: rgba(220,252,231,.6); }
+html[data-theme="dark"] .card.invest .card-head { background: rgba(22,60,38,.6); }
+.card:not(.invest) .card-head { opacity: .88; }
+.card:not(.invest) { border-color: var(--line); }
+.tag-invest {
+  background: #16a34a; color: #fff; border-radius: 4px; padding: 1px 7px;
+  font-size: 11px; font-weight: 700; animation: investPulse 1.6s ease-in-out infinite;
+}
+html[data-theme="dark"] .tag-invest { background: #22c55e; color: #052e16; }
+@keyframes investPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(34,197,94,.0); }
+  50% { box-shadow: 0 0 0 4px rgba(34,197,94,.18); }
+}

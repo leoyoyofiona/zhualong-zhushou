@@ -525,7 +525,35 @@ function ratePanelHtml(pool) {
   </div>`;
 }
 
+
+/* 哪些玩法当前在投注单里有实际投入金额（高亮对应卡片用） */
+function currentInvestPools() {
+  const set = new Set();
+  for (const pool of JCZQ_POOLS) {
+    const items = [...(APP.sel[pool] || new Map()).values()];
+    const hasMoney = items.some(i => (Number(i.stake) || 0) > 0);
+    const hasCombos = (APP.combos[pool] || []).length > 0;
+    const pc = APP.cardPass[pool] && APP.cardPass[pool].mode === "parlay" ? parlayCompute(pool) : null;
+    if (hasMoney || hasCombos || (pc && pc.notes > 0)) set.add(pool);
+  }
+  for (const pool of ZUCAI_ORDER) {
+    const sel = APP.zsel[pool];
+    if (sel && Object.values(sel.rows || {}).some(r => (r.options || []).length)) set.add(pool);
+  }
+  return set;
+}
+
+function ensureInvest() {
+  APP.investPools = currentInvestPools();
+}
+
+function investBadge(pool) {
+  return APP.investPools && APP.investPools.has(pool)
+    ? '<span class="tag-invest">💡 方案投入</span>' : "";
+}
+
 function renderCards() {
+  ensureInvest();
   const host = $("cards");
   host.innerHTML = "";
   const frag = document.createDocumentFragment();
@@ -538,6 +566,7 @@ function renderCards() {
 
 /* 只重建某一张卡片（避免每次点击全量重渲染，比分/进球卡按钮多时会卡顿） */
 function renderCard(pool) {
+  ensureInvest();
   const card = buildCard(pool);
   if (!card) return;
   const old = document.querySelector(`#cards .card[data-pool="${pool}"]`);
@@ -622,14 +651,17 @@ function buildJczqCard(pool) {
   const combosHtml = (plan.combos || []).length ? renderCombos(pool, plan.combos) : "";
   const spent = plan.spent || 0;
   const manualBadge = manual ? '<span class="tag-manual">手动模式</span>' : "";
+  const invested = APP.investPools && APP.investPools.has(pool);
   card.innerHTML = `<div class="card-head" data-toggle>
       <span class="title">${POOL_TITLE[pool]}</span>
+      ${investBadge(pool)}
       ${manualBadge}
       <span class="meta">${shown.length}/${matches.length}场 · 方案${fmt(spent)}元</span>
       <button class="btn small adopt" data-adopt="${pool}">采用推荐</button>
       <button class="btn small manual-btn ${manual ? "active" : ""}" data-manual="${pool}">手动</button>
     </div>
     <div class="card-body">${ratePanelHtml(pool)}${chips}${passModeHtml}${body}${combosHtml}</div>`;
+  if (invested) card.classList.add("invest");
   return card;
 }
 
@@ -696,6 +728,7 @@ function buildZucaiCard(pool) {
   const manualBadge = manual ? '<span class="tag-manual">手动模式</span>' : "";
   card.innerHTML = `<div class="card-head" data-toggle>
       <span class="title">${POOL_TITLE[pool]}</span>
+      ${investBadge(pool)}
       <span class="tag-issue">${esc(issue.issue)}期</span>
       ${issue.demo_fill ? '<span class="tag-demo">演示</span>' : ""}
       ${manualBadge}
@@ -706,6 +739,7 @@ function buildZucaiCard(pool) {
     <div class="card-body">${ratePanelHtml(pool)}${body}
       <div class="ticket-line">${ticket}</div>
     </div>`;
+  if (APP.investPools && APP.investPools.has(pool)) card.classList.add("invest");
   return card;
 }
 
@@ -1028,6 +1062,7 @@ function passGeneratorHtml() {
 }
 
 function renderSlip() {
+  ensureInvest();
   const body = $("slip-body");
   const groups = [];
   let total = 0;
