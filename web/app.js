@@ -2063,21 +2063,19 @@ const DANMU = {
   newQ: [],         // 新建议队列（到达时立即优先飘）
   cycle: [],        // 循环轮播队列（最近建议反复飘，主页一直有弹幕）
   cycleIdx: 0,      // 循环播放游标
-  lastRot: 0,       // 上次循环轮播时间（控制节奏，避免刷屏）
   lastListText: "", // 列表渲染指纹
   unseen: 0,        // 新建议角标计数
   active: 0,        // 当前主页正在飘的条数
   mainOn: localStorage.getItem("zucai_danmu_main") !== "0",
   booted: false,    // 是否已完成首屏加载
 };
-const DANMU_MAX_FLY = 4;    // 主页同屏最多飘条数
 const DANMU_ROTATE_N = 10;  // 循环轮播最近 N 条
 const FLY_COLORS = ["#2563eb", "#0ea5e9", "#7c3aed", "#0d9488", "#db2777", "#ea580c"];
 
 function danmuMainOn(on) {
   DANMU.mainOn = on;
   localStorage.setItem("zucai_danmu_main", on ? "1" : "0");
-  $("danmu-overlay").style.display = on ? "" : "none";
+  $("danmu-track").style.display = on ? "" : "none";
 }
 
 function danmuToggle() {
@@ -2164,62 +2162,61 @@ function updateDanmuBadge() {
   b.classList.toggle("hidden", !DANMU.unseen);
 }
 
-/* 主页弹幕调度：新建议插队立即飘；其余时间循环轮播，主页始终有弹幕飘过 */
+/* 顶部弹幕调度：新建议插队立即飘；其余时间循环轮播，一条接一条循环出现 */
 function tickDanmu() {
   if (!DANMU.mainOn || document.hidden) return;
-  if (DANMU.active >= DANMU_MAX_FLY) return;
-  const ov = $("danmu-overlay");
-  if (!ov) return;
+  const tr = $("danmu-track");
+  if (!tr) return;
+  // 轨道上一次只滚一条：上一条滚完前不挤入下一条
+  if (tr.querySelector(".danmu-fly")) return;
   let id = null;
   if (DANMU.newQ.length) {
-    // 新建议：立即插播，不受节奏限制
-    id = DANMU.newQ.shift();
+    id = DANMU.newQ.shift();   // 新建议：立即插播
   } else if (DANMU.cycle.length) {
-    // 循环轮播节奏：条数越多每条间隔越长（如 8 条约每 6 秒重飘一轮中一条）
-    const perGap = 2600 + DANMU.cycle.length * 220;
-    if (Date.now() - DANMU.lastRot >= perGap) {
-      id = DANMU.cycle[DANMU.cycleIdx % DANMU.cycle.length];
-      DANMU.cycleIdx++;
-      DANMU.lastRot = Date.now();
-    }
+    id = DANMU.cycle[DANMU.cycleIdx % DANMU.cycle.length];
+    DANMU.cycleIdx++;
   }
   if (!id) return;
   const it = DANMU.items.find(x => x.id === id);
-  if (it) flyOnPage(it);
+  if (it) flyInTrack(it);
 }
 
-function flyOnPage(it) {
-  const ov = $("danmu-overlay");
-  if (!ov) return;
+function flyInTrack(it) {
+  const tr = $("danmu-track");
+  if (!tr) return;
+  const idle = tr.querySelector(".danmu-idle");
+  if (idle) idle.style.display = "none";   // 有弹幕时不显示占位提示
   const el = document.createElement("div");
   el.className = "danmu-fly";
   const color = FLY_COLORS[(it.nick || "").length % FLY_COLORS.length];
   el.innerHTML = `<span class="df-nick">${esc(it.nick)}</span> ${esc(it.text)}`;
   el.style.background = color;
-  ov.appendChild(el);
-  const vw = window.innerWidth || document.documentElement.clientWidth || 1200;
+  tr.appendChild(el);
+  const W = tr.clientWidth || document.documentElement.clientWidth || 1200;
   const tw = el.scrollWidth || 260;
-  el.style.top = (8 + Math.random() * 62) + "vh";   // 避开底部按钮/顶栏区域，飘在主内容上
-  el.style.fontSize = 13 + Math.floor(Math.random() * 3) + "px";
-  el.style.opacity = 0.85 + Math.random() * 0.15;
   DANMU.active++;
-  const dur = 10000 + Math.floor(Math.random() * 5000);
-  const startX = vw + 40, endX = -(tw + 60);
+  const dur = Math.min(24000, Math.max(7000, (it.text || "").length * 90)); // 文本越长滚得越慢，保证能读完
+  const startX = W + 40, endX = -(tw + 60);
+  const finish = () => {
+    el.remove();
+    DANMU.active = Math.max(0, DANMU.active - 1);
+    // 兜底：万一动画没触发也释放计数
+    setTimeout(() => { if (!el.isConnected) DANMU.active = Math.max(0, DANMU.active - 1); }, 200);
+  };
   if (typeof el.animate === "function") {
     const anim = el.animate(
       [{ transform: `translateX(${startX}px)` }, { transform: `translateX(${endX}px)` }],
       { duration: dur, easing: "linear" }
     );
-    anim.onfinish = () => { el.remove(); DANMU.active = Math.max(0, DANMU.active - 1); };
+    anim.onfinish = finish;
+    anim.oncancel = finish;
   } else {
-    // 回退：CSS transition（jsdom 等无 WAAPI 环境不报错，也不抛异常）
+    // 回退：CSS transition（jsdom 等无 WAAPI 环境不报错）
     el.style.transition = `transform ${dur}ms linear`;
     el.style.transform = `translateX(${startX}px)`;
     setTimeout(() => { el.style.transform = `translateX(${endX}px)`; }, 20);
-    setTimeout(() => { el.remove(); DANMU.active = Math.max(0, DANMU.active - 1); }, dur + 300);
+    setTimeout(finish, dur + 200);
   }
-  // 兜底：万一动画未触发也释放计数
-  setTimeout(() => { if (!el.isConnected) DANMU.active = Math.max(0, DANMU.active - 1); }, dur + 500);
 }
 
 function timeFmt(t) {

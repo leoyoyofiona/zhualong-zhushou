@@ -561,17 +561,22 @@ html[data-theme="dark"] .tag-invest { background: #22c55e; color: #052e16; }
 
 /* ================ 建议弹幕：主页直接飘屏（公开透明 · 弹幕 + 可回看列表） ================ */
 
-/* 主页弹幕层：铺在整个主页面内容之上，不挡任何点击 */
-.danmu-overlay {
-  position: fixed; inset: 0; z-index: 200; pointer-events: none; overflow: hidden;
+/* 顶部弹幕轨道：固定在页面最上方一行，建议一条接一条从右往左循环滚过 */
+.danmu-track {
+  position: relative; height: 30px; overflow: hidden; pointer-events: none;
+  background: linear-gradient(90deg, #0f172a, #1e3a8a); color: #fff;
+  display: flex; align-items: center; padding: 0 12px; z-index: 90;
 }
-.danmu-fly {
-  position: absolute; left: 0; white-space: nowrap; color: #fff;
-  border-radius: 999px; padding: 4px 16px; line-height: 1.5;
-  box-shadow: 0 4px 16px rgba(15,23,42,.28); will-change: transform;
-  font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.25); pointer-events: none;
+html[data-theme="dark"] .danmu-track { background: linear-gradient(90deg, #020617, #1e3a8a); }
+.danmu-idle { font-size: 12px; color: rgba(255,255,255,.75); white-space: nowrap; }
+.danmu-track .danmu-fly {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  left: 0; white-space: nowrap; color: #fff;
+  border-radius: 999px; padding: 2px 14px; line-height: 1.6;
+  box-shadow: 0 2px 10px rgba(15,23,42,.3); font-weight: 600;
+  text-shadow: 0 1px 2px rgba(0,0,0,.25); pointer-events: none;
 }
-.danmu-fly .df-nick { color: #fde68a; font-weight: 800; margin-right: 2px; }
+.danmu-track .danmu-fly .df-nick { color: #fde68a; font-weight: 800; margin-right: 4px; }
 
 /* 右下角悬浮入口按钮 */
 .danmu-wrap { position: fixed; right: 16px; bottom: 16px; z-index: 400; }
