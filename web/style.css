@@ -644,3 +644,11 @@ html[data-theme="dark"] .danmu-form input, html[data-theme="dark"] .danmu-form t
 .danmu-hidden-tag { font-size: 10.5px; color: var(--danger); background: rgba(220,38,38,.08); border-radius: 6px; padding: 1px 8px; margin: 2px 0 4px; }
 .dbtn.restore { color: #15803d; border-color: #86efac; }
 .dbtn.restore:hover { background: #dcfce7; color: #15803d; }
+
+/* 访问统计条 */
+.visit-stats {
+  text-align: center; font-size: 12px; color: var(--dim);
+  padding: 10px 16px 2px;
+}
+.visit-stats b { color: var(--accent); font-size: 13px; }
+html[data-theme="dark"] .visit-stats b { color: #60a5fa; }

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import sqlite3
@@ -549,6 +550,113 @@ def sug_restore(handler, sid: str, code: str):
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"恢复失败: {e}"}
 
+# ---------------- 访问统计（累计访问/独立访客/按日，COS 持久化） ----------------
+
+VISIT_KEY = "zucai/visits.json"
+_visit_lock = threading.Lock()
+_visit_cache = {"ts": 0.0, "data": None}
+_VISIT_TTL = 6.0
+_VISIT_FLOOD = {}           # ip_hash -> 上次计数时间（同一访客 20s 内只计一次，防刷新刷屏）
+_VISIT_FLOOD_GAP = 20
+_VISIT_DAYS_KEEP = 366      # 按日历史保留一年
+
+
+def _visit_default():
+    return {"total": 0, "visitors": [], "today": "", "today_count": 0, "today_ips": [], "days": {}}
+
+
+def _visit_load(force: bool = False):
+    with _visit_lock:
+        if not force and _visit_cache["data"] is not None \
+                and (time.time() - _visit_cache["ts"]) < _VISIT_TTL:
+            return _visit_cache["data"]
+    if cos_store.is_configured():
+        try:
+            obj = cos_store.cos_get_json(VISIT_KEY)
+        except Exception:  # noqa: BLE001
+            obj = None
+    else:
+        obj = None
+    data = obj if isinstance(obj, dict) else _visit_default()
+    data.setdefault("total", 0)
+    data.setdefault("visitors", [])
+    data.setdefault("today", "")
+    data.setdefault("today_count", 0)
+    data.setdefault("today_ips", [])
+    data.setdefault("days", {})
+    with _visit_lock:
+        _visit_cache.clear()
+        _visit_cache.update(ts=time.time(), data=data)
+    return data
+
+
+def _visit_save(data):
+    with _visit_lock:
+        _visit_cache.clear()
+        _visit_cache.update(ts=time.time(), data=data)
+    if cos_store.is_configured():
+        try:
+            cos_store.cos_put_json(VISIT_KEY, data)
+        except Exception as e:  # noqa: BLE001
+            print(f"[visit] COS 保存失败(降级为内存统计): {e}")
+
+
+def _ip_hash(ip: str) -> str:
+    # 只存 IP 的 sha1 前 16 位用于去重，不存明文，保护访客隐私
+    return hashlib.sha1(("zucai-visit:" + (ip or "")).encode()).hexdigest()[:16]
+
+
+def _roll_day(data):
+    """跨天时把前一天归档进 days。"""
+    today = dt.date.today().isoformat()
+    if data.get("today") and data["today"] != today:
+        old = data["today"]
+        data["days"][old] = {"count": int(data.get("today_count", 0)),
+                             "visitors": len(data.get("today_ips", []))}
+        # 清理超过保留期的历史
+        cutoff = (dt.date.today() - dt.timedelta(days=_VISIT_DAYS_KEEP)).isoformat()
+        for k in [k for k in data["days"] if k < cutoff]:
+            data["days"].pop(k, None)
+    data["today"] = today
+    return today
+
+
+def visit_count(handler, record: bool = True):
+    """record=True: 页面加载计数一次(同访客20s内去重)；False: 仅查询当前统计。"""
+    ip = _client_ip(handler)
+    ih = _ip_hash(ip)
+    allow = False
+    if record:
+        with _visit_lock:
+            last = _VISIT_FLOOD.get(ih, 0)
+            if time.time() - last >= _VISIT_FLOOD_GAP:
+                allow = True
+                _VISIT_FLOOD[ih] = time.time()
+    data = _visit_load(force=allow)
+    today = _roll_day(data)
+    if allow and record:
+        if ih not in data["visitors"]:          # 累计独立访客
+            data["visitors"].append(ih)
+        tips = data["today_ips"]
+        if ih not in tips:                       # 今日独立访客
+            tips.append(ih)
+        data["today_count"] = int(data["today_count"]) + 1
+        data["total"] = int(data["total"]) + 1
+        _visit_save(data)
+    return {
+        "ok": True,
+        "total": int(data.get("total", 0)),
+        "visitors": len(data.get("visitors", [])),
+        "today": today,
+        "today_count": int(data.get("today_count", 0)),
+        "today_visitors": len(data.get("today_ips", [])),
+        "days": len(data.get("days", {})),
+        "note": "数据保存在腾讯云 COS，重启/重新部署不会清零",
+    }
+
+
+# ---------------- HTTP ----------------
+
 
 # ---------------- HTTP ----------------
 
@@ -637,6 +745,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(sug_list(force=force))
         elif p == "/api/suggestions/status":
             self._json(sug_status())
+        elif p == "/api/visit":
+            self._json(visit_count(self, record=True))
+        elif p == "/api/visits":
+            self._json(visit_count(self, record=False))
         elif not p.startswith("/api/"):
             # 其余静态资源（qr 收款码等图片、前端文件）
             self._serve_static(p[1:] or "index.html")

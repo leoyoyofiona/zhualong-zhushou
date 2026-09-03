@@ -2498,6 +2498,27 @@ function setBudget(v) {
   recomputePlan();
 }
 
+/* 访问统计：每次页面加载记一次访问(服务端对同一访客20s内去重)并显示 */
+async function recordVisit() {
+  try {
+    const r = await api("/api/visit");
+    renderVisitStats(r);
+  } catch (e) { /* 离线/统计失败不影响主功能 */ }
+}
+
+async function refreshVisitStats() {
+  try {
+    const r = await api("/api/visits");
+    renderVisitStats(r);
+  } catch (e) {}
+}
+
+function renderVisitStats(r) {
+  const el = $("visit-stats");
+  if (!el || !r || !r.ok) return;
+  el.innerHTML = `📊 本站累计访问 <b>${r.total}</b> 次 · 今日 <b>${r.today_count}</b> 次 · 累计 <b>${r.visitors}</b> 位访客 · 今日 <b>${r.today_visitors}</b> 位`;
+}
+
 async function init() {
   try { APP.settings = JSON.parse(localStorage.getItem("zucai_settings") || "{}"); } catch (e) { APP.settings = {}; }
   try { APP.weights = JSON.parse(localStorage.getItem("zucai_weights") || "null") || null; } catch (e) { APP.weights = null; }
@@ -2527,6 +2548,8 @@ async function init() {
   bindEvents();
   await loadState();
   if (APP.weights) recomputePlan();
+  recordVisit();   // 页面加载：记录一次访问并显示统计
+  setInterval(refreshVisitStats, 60000);
   APP.timer = setInterval(() => {
     api("/api/state").then(s => {
       if (!s.refreshing && s.updated_at !== (APP.data && APP.data.generated_at)) {
