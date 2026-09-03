@@ -377,12 +377,12 @@ def sug_status():
     admin_set = bool((cfg.get("admin_code") or "") or os.environ.get("COS_ADMIN_CODE"))
     return {"ok": True, "configured": ok, "bucket": cfg.get("bucket", ""),
             "region": cfg.get("region", ""), "admin_set": admin_set,
-            "tip": "未配置腾讯云 COS 时建议仅存内存(重启丢失);配置后永久保存在你的 COS 桶"}
+            "tip": "未配置腾讯云 COS 时弹幕交流仅存内存(重启丢失);配置后永久保存在你的 COS 桶"}
 
 
 def sug_list(force: bool = False):
     if not cos_store.is_configured():
-        return {"ok": False, "error": "管理员尚未配置建议存储(设置→建议存储)，暂用内存模式",
+        return {"ok": False, "error": "管理员尚未配置弹幕交流存储(设置→弹幕交流)，暂用内存模式",
                 "items": []}
     try:
         items = _sug_load(force=force)
@@ -398,7 +398,7 @@ def _client_ip(handler) -> str:
 
 def sug_add(handler, text: str, nick: str = ""):
     if not cos_store.is_configured():
-        return {"ok": False, "error": "管理员尚未配置建议存储，暂不能提交(设置→建议存储)"}
+        return {"ok": False, "error": "管理员尚未配置弹幕交流存储，暂不能发言(设置→弹幕交流)"}
     text = (text or "").strip()
     if not text:
         return {"ok": False, "error": "内容不能为空"}
@@ -495,7 +495,7 @@ def sug_delete(sid: str, code: str):
 def sug_set_admin(handler, code: str, new_code: str):
     """设置管理口令：已设置时需旧口令验证；COS 未配置时拒绝(口令存服务器端配置)。"""
     if not cos_store.is_configured():
-        return {"ok": False, "error": "请先配置建议存储(COS)"}
+        return {"ok": False, "error": "请先配置弹幕交流存储(COS)"}
     cur = sug_admin_code()
     if cur and code != cur:
         return {"ok": False, "error": "当前管理口令不正确"}
@@ -528,7 +528,7 @@ def sug_clear(handler, code: str):
         return {"ok": False, "error": "站密码不正确"}
     try:
         _sug_save([])
-        return {"ok": True, "msg": "已清空全部建议"}
+        return {"ok": True, "msg": "已清空全部弹幕"}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": f"清空失败: {e}"}
 

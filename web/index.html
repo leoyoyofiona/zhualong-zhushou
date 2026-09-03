@@ -16,8 +16,8 @@
   <span class="vs3">· 累计 <b>--</b> 位访客</span>
   <span class="vs4">· 今日 <b>--</b> 位</span>
 </div>
-<!-- 顶部弹幕轨道：所有人发的建议在此从右往左、一条接一条循环出现（不挡点击） -->
-<div class="danmu-track" id="danmu-track"><span class="danmu-idle">💬 建议弹幕：点右下角 💬 写建议，会在这里循环滚给大家看</span></div>
+<!-- 顶部弹幕轨道：所有人的发言在此从右往左、一条接一条循环出现（不挡点击） -->
+<div class="danmu-track" id="danmu-track"><span class="danmu-idle">💬 弹幕交流：点右下角 💬 说两句，会在这里循环滚给大家看</span></div>
 <header class="topbar">
   <div class="brand">
     <div class="dd" id="dd-works">
@@ -54,7 +54,7 @@
     <div class="dd">
       <button id="btn-history" class="btn dd-trigger">📋 历史</button>
       <button id="btn-review" class="btn" title="预测 vs 赛果：各玩法命中率与归因分析">📊 复盘</button>
-      <button id="btn-danmu" class="btn" title="建议弹幕：公开提建议，所有人都能看到">💬 建议</button>
+      <button id="btn-danmu" class="btn" title="弹幕交流：说话大家都看得到">💬 弹幕交流</button>
       <button id="btn-theme" class="btn" title="主题：自动/浅色/深色">🌓</button>
       <div class="dd-panel dd-menu">
         <div class="dd-item" data-action="open-history">📋 查看历史记录</div>
@@ -141,8 +141,8 @@
       <label class="field">API Key <input id="llm-key" type="password" placeholder="sk-..."></label>
       <button id="btn-llm-test" class="btn">分析当前数据（试一下）</button>
       <div id="llm-result" class="llm-result"></div>
-      <h4>💬 建议弹幕（公开透明 · 腾讯云 COS 存储）</h4>
-      <p class="hint" id="sug-cfg-state">正在检测建议存储配置…</p>
+      <h4>💬 弹幕交流（公开透明 · 腾讯云 COS 存储）</h4>
+      <p class="hint" id="sug-cfg-state">正在检测弹幕交流存储配置…</p>
       <div class="field-row" id="sug-admin-row">
         <label class="field">管理口令 <input id="sug-admin-cur" type="password" placeholder="已设置则填当前口令"></label>
         <label class="field">新口令 <input id="sug-admin-new" type="password" placeholder="设置/修改管理口令"></label>
@@ -213,12 +213,12 @@
   </div>
 </div>
 
-<!-- 建议弹幕：右下角悬浮按钮 → 展开完整面板（全部建议/点赞/举报/发言） -->
+<!-- 弹幕交流：右下角悬浮按钮 → 展开完整面板（全部弹幕/点赞/举报/发言） -->
 <div class="danmu-wrap" id="danmu-wrap">
-  <button class="danmu-fab" id="danmu-fab" title="建议弹幕：点开看全部建议与发言">💬 <span class="danmu-badge hidden" id="danmu-badge">0</span></button>
+  <button class="danmu-fab" id="danmu-fab" title="弹幕交流：点开看全部留言与发言">💬 <span class="danmu-badge hidden" id="danmu-badge">0</span></button>
   <div class="danmu-panel hidden" id="danmu-panel">
     <div class="danmu-head">
-      <b>💬 建议弹幕</b>
+      <b>💬 弹幕交流</b>
       <span class="danmu-sub">公开透明 · 顶部轨道循环滚给大家看</span>
       <label class="danmu-main-toggle" title="是否在最上方轨道显示弹幕"><input type="checkbox" id="danmu-main" checked> 轨道</label>
       <button id="btn-danmu-admin" class="btn small" title="站密码进入管理：删除/清空/恢复">🔐 管理</button>
@@ -226,15 +226,15 @@
     </div>
     <div class="danmu-adminbar hidden" id="danmu-adminbar">
       <span class="admin-tag">👑 管理模式</span>
-      <button id="btn-danmu-clear" class="btn small danger" title="清空全部建议(需二次确认)">🗑 清空全部</button>
+      <button id="btn-danmu-clear" class="btn small danger" title="清空全部弹幕(需二次确认)">🗑 清空全部</button>
       <button id="btn-danmu-admin-exit" class="btn small">退出管理</button>
       <span class="admin-tip">可删除任意一条、恢复被举报隐藏的、或一键清空。</span>
     </div>
-    <div class="danmu-hint">所有人提交的建议会像弹幕一样在主页飘过；这里是全部历史建议（👍=有用，⛔=举报不当内容）。</div>
+    <div class="danmu-hint">所有人的发言会像弹幕一样在顶部飘过；这里是全部历史记录（👍=有用，⛔=举报不当内容）。</div>
     <div class="danmu-list" id="danmu-list"><div class="slip-empty">加载中…</div></div>
     <div class="danmu-form">
       <input id="danmu-nick" maxlength="16" placeholder="昵称(可选，默认彩友)">
-      <textarea id="danmu-text" maxlength="300" rows="2" placeholder="写下你的建议，例如：今晚欧冠我觉得皇马会赢，可以多投胜平负…"></textarea>
+      <textarea id="danmu-text" maxlength="300" rows="2" placeholder="写点想交流的，例如：今晚欧冠我觉得皇马会赢，可以多投胜平负…"></textarea>
       <button id="btn-danmu-send" class="btn primary">📨 发送（公开）</button>
     </div>
   </div>

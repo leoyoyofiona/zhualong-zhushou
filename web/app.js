@@ -2055,7 +2055,7 @@ function bindEvents() {
   initDanmu();
 }
 
-/* ---------------- 建议弹幕（主页直接飘屏 · 公开透明 · COS 存储） ---------------- */
+/* ---------------- 弹幕交流（顶部弹幕 · 公开透明 · COS 存储） ---------------- */
 
 const DANMU = {
   items: [],        // 全部可见建议（旧→新）
@@ -2212,7 +2212,7 @@ function flyInTrack(it) {
   const n = Number(it.likes) || 0;
   // 弹幕结构：昵称 + 文字 + 点赞(👍数量，悬停时放大会拇指)。liked 表示本浏览器已赞过
   el.innerHTML = `<span class="df-nick">${esc(it.nick)}</span><span class="df-txt">${esc(it.text)}</span>
-    <button class="df-like${liked ? " liked" : ""}" data-like="${esc(it.id)}" title="点👍给这条建议点赞">👍 <b>${n}</b></button>`;
+    <button class="df-like${liked ? " liked" : ""}" data-like="${esc(it.id)}" title="点👍给这条弹幕点个赞">👍 <b>${n}</b></button>`;
   el.style.background = color;
   tr.appendChild(el);
   const W = tr.clientWidth || document.documentElement.clientWidth || 1200;
@@ -2302,8 +2302,8 @@ function renderDanmuList(items, isAdmin) {
   if (!box) return;
   if (!items || !items.length) {
     box.innerHTML = isAdmin
-      ? `<div class="slip-empty">当前没有任何建议（含被举报隐藏的）。</div>`
-      : `<div class="slip-empty">还没有建议。写下第一条吧（所有人公开可见）👇</div>`;
+      ? `<div class="slip-empty">当前没有任何弹幕（含被举报隐藏的）。</div>`
+      : `<div class="slip-empty">还没有弹幕。说第一句吧（所有人公开可见）👇</div>`;
     return;
   }
   const fp = (isAdmin ? "A|" : "P|") + items.map(x => `${x.id}|${x.likes}|${x.hidden}|${x.reports || 0}`).join(",");
@@ -2315,7 +2315,7 @@ function renderDanmuList(items, isAdmin) {
     const flag = it.hidden ? `<div class="danmu-hidden-tag">⚠️ 被举报自动隐藏（${it.reports || 1}人）· 仅管理可见</div>` : "";
     const adminBtns = isAdmin ? (it.hidden
       ? `<button class="dbtn restore" data-restore="${esc(it.id)}" title="恢复为公开可见">↺ 恢复</button>`
-      : `<button class="dbtn danger" data-del="${esc(it.id)}" title="删除这条建议">🗑 删除</button>`) : "";
+      : `<button class="dbtn danger" data-del="${esc(it.id)}" title="删除这条弹幕">🗑 删除</button>`) : "";
     return `<div class="danmu-item">
       <div class="danmu-meta"><b>${esc(it.nick)}</b><span>${timeFmt(it.t)}</span></div>
       ${flag}
@@ -2363,11 +2363,11 @@ function danmuAdminExit() {
 function danmuAdminClear() {
   if (!DANMU.admin) { toast("请先进入管理模式"); return; }
   const n = DANMU.adminList ? DANMU.adminList.length : 0;
-  if (!confirm(`确定清空全部 ${n} 条建议吗？此操作不可恢复！`)) return;
+  if (!confirm(`确定清空全部 ${n} 条弹幕吗？此操作不可恢复！`)) return;
   api("/api/suggestions/clear", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ admin: DANMU.admin }) }).then(r => {
     if (!r.ok) { toast(r.error || "清空失败"); return; }
-    toast("已清空全部建议");
+    toast("已清空全部弹幕");
     refreshSuggestions(true);
   }).catch(e => toast("清空失败：" + e.message));
 }
@@ -2405,7 +2405,7 @@ function danmuSend() {
     body: JSON.stringify({ text, nick }) }).then(r => {
     if (!r.ok) { toast(r.error || "发送失败"); return; }
     $("danmu-text").value = "";
-    toast("已公开，谢谢你的建议！");
+    toast("已公开，说得好！");
     refreshSuggestions(true);
   }).catch(e => toast("发送失败：" + e.message))
     .finally(() => { btn.disabled = false; btn.textContent = old; });
@@ -2461,9 +2461,9 @@ function sugStatusRefresh() {
   api("/api/suggestions/status").then(r => {
     if (!r.ok) { el.innerHTML = `<span class="err">${esc(r.error || "状态读取失败")}</span>`; return; }
     if (r.configured) {
-      el.innerHTML = `<span style="color:var(--good,#16a34a)">✅ 已配置 · 建议保存在 COS 桶 <b>${esc(r.bucket)}</b>（${esc(r.region)}），重启/换设备都不丢。</span>`;
+      el.innerHTML = `<span style="color:var(--good,#16a34a)">✅ 已配置 · 弹幕交流保存在 COS 桶 <b>${esc(r.bucket)}</b>（${esc(r.region)}），重启/换设备都不丢。</span>`;
     } else {
-      el.innerHTML = `<span style="color:var(--warn)">⚠️ 未配置 COS（服务器环境变量 COS_SECRET_ID/COS_SECRET_KEY/COS_BUCKET/COS_REGION）。未配置时建议只存内存，重启即丢。</span>`;
+      el.innerHTML = `<span style="color:var(--warn)">⚠️ 未配置 COS（服务器环境变量 COS_SECRET_ID/COS_SECRET_KEY/COS_BUCKET/COS_REGION）。未配置时弹幕只存内存，重启即丢。</span>`;
     }
     $("btn-sug-admin").disabled = !r.configured;
   }).catch(() => {});
