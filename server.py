@@ -30,6 +30,7 @@ from urllib.parse import parse_qs, urlparse
 import engine
 import review
 import sources
+import cos_store
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(BASE_DIR, "web")
@@ -286,6 +287,175 @@ def background_refresh():
         refresh_data()
 
 
+# ---------------- 建议弹幕（公开透明，腾讯云 COS 持久化） ----------------
+
+SUG_OBJECT_KEY = "zucai/suggestions.json"
+_sug_lock = threading.Lock()
+_sug_cache = {"ts": 0.0, "items": None}      # 简单读缓存（COS 往返较慢）
+_sug_flood = {}                               # ip -> 上次提交时间（30s 限流）
+SUG_TEXT_MAX = 300
+SUG_NICK_MAX = 16
+_SUG_CACHE_TTL = 8.0
+
+
+def _sug_load(force: bool = False):
+    """读取全部建议(已隐藏的带 hidden 标记返回,由前端过滤)。COS 不可用时抛错。"""
+    with _sug_lock:
+        if not force and _sug_cache["items"] is not None \
+                and (time.time() - _sug_cache["ts"]) < _SUG_CACHE_TTL:
+            return _sug_cache["items"]
+    items = (cos_store.cos_get_json(SUG_OBJECT_KEY) or {}).get("items") or []
+    with _sug_lock:
+        _sug_cache.clear()
+        _sug_cache.update(ts=time.time(), items=items)
+    return items
+
+
+def _sug_save(items):
+    with _sug_lock:
+        cos_store.cos_put_json(SUG_OBJECT_KEY, {"items": items})
+        _sug_cache.clear()
+        _sug_cache.update(ts=time.time(), items=items)
+
+
+def _sug_visible(items, is_admin: bool = False):
+    out = []
+    for it in sorted(items, key=lambda x: x.get("t", 0)):
+        if not it.get("hidden") or is_admin:
+            out.append(it)
+    return out
+
+
+def sug_status():
+    cfg = cos_store.get_config()
+    ok = cos_store.is_configured()
+    admin_set = bool((cfg.get("admin_code") or "") or os.environ.get("COS_ADMIN_CODE"))
+    return {"ok": True, "configured": ok, "bucket": cfg.get("bucket", ""),
+            "region": cfg.get("region", ""), "admin_set": admin_set,
+            "tip": "未配置腾讯云 COS 时建议仅存内存(重启丢失);配置后永久保存在你的 COS 桶"}
+
+
+def sug_list(force: bool = False):
+    if not cos_store.is_configured():
+        return {"ok": False, "error": "管理员尚未配置建议存储(设置→建议存储)，暂用内存模式",
+                "items": []}
+    try:
+        items = _sug_load(force=force)
+        return {"ok": True, "items": _sug_visible(items)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"读取建议失败: {e}", "items": []}
+
+
+def _client_ip(handler) -> str:
+    return (handler.headers.get("X-Forwarded-For") or "").split(",")[0].strip() \
+        or handler.client_address[0]
+
+
+def sug_add(handler, text: str, nick: str = ""):
+    if not cos_store.is_configured():
+        return {"ok": False, "error": "管理员尚未配置建议存储，暂不能提交(设置→建议存储)"}
+    text = (text or "").strip()
+    if not text:
+        return {"ok": False, "error": "内容不能为空"}
+    text = text[:SUG_TEXT_MAX]
+    nick = (nick or "").strip()[:SUG_NICK_MAX] or "彩友"
+    ip = _client_ip(handler)
+    now = time.time()
+    with _sug_lock:
+        last = _sug_flood.get(ip, 0)
+        if now - last < 30:
+            return {"ok": False, "error": "提交太频繁，请 30 秒后再试"}
+        _sug_flood[ip] = now
+    item = {"id": f"{int(now * 1000)}-{abs(hash(ip)) % 9973}",
+            "t": now, "nick": nick, "text": text,
+            "likes": 0, "like_ips": [], "reports": 0, "hidden": False}
+    try:
+        items = _sug_load(force=True)
+        items.append(item)
+        _sug_save(items)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"保存失败: {e}"}
+    return {"ok": True, "item": {k: v for k, v in item.items() if k != "like_ips"}}
+
+
+def sug_like(handler, sid: str):
+    ip = _client_ip(handler)
+    try:
+        items = _sug_load(force=True)
+        it = next((x for x in items if x.get("id") == sid), None)
+        if not it:
+            return {"ok": False, "error": "该条不存在或已被删除"}
+        ips = it.setdefault("like_ips", [])
+        if ip in ips:
+            return {"ok": False, "error": "你已经点过赞啦"}
+        ips.append(ip)
+        it["likes"] = len(ips)
+        _sug_save(items)
+        return {"ok": True, "likes": it["likes"]}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"点赞失败: {e}"}
+
+
+def sug_report(handler, sid: str):
+    ip = _client_ip(handler)
+    try:
+        items = _sug_load(force=True)
+        it = next((x for x in items if x.get("id") == sid), None)
+        if not it:
+            return {"ok": False, "error": "该条不存在或已被删除"}
+        ips = it.setdefault("report_ips", [])
+        if ip in ips:
+            return {"ok": False, "error": "你已经举报过这条了"}
+        ips.append(ip)
+        it["reports"] = len(ips)
+        if it["reports"] >= 2:
+            it["hidden"] = True
+        _sug_save(items)
+        return {"ok": True, "hidden": bool(it.get("hidden")),
+                "msg": "该条已自动隐藏（2人举报）" if it.get("hidden") else "已记录举报，感谢维护环境"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"举报失败: {e}"}
+
+
+def sug_admin_code():
+    cfg = cos_store.get_config()
+    return os.environ.get("COS_ADMIN_CODE") or (cfg.get("admin_code") or "")
+
+
+def sug_delete(sid: str, code: str):
+    if not code or code != sug_admin_code():
+        return {"ok": False, "error": "管理口令不正确"}
+    try:
+        items = _sug_load(force=True)
+        before = len(items)
+        items = [x for x in items if x.get("id") != sid]
+        if len(items) == before:
+            return {"ok": False, "error": "该条不存在或已被删除"}
+        _sug_save(items)
+        return {"ok": True, "msg": "已删除"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"删除失败: {e}"}
+
+
+def sug_set_admin(handler, code: str, new_code: str):
+    """设置管理口令：已设置时需旧口令验证；COS 未配置时拒绝(口令存服务器端配置)。"""
+    if not cos_store.is_configured():
+        return {"ok": False, "error": "请先配置建议存储(COS)"}
+    cur = sug_admin_code()
+    if cur and code != cur:
+        return {"ok": False, "error": "当前管理口令不正确"}
+    new_code = (new_code or "").strip()
+    if not new_code:
+        return {"ok": False, "error": "口令不能为空"}
+    if os.environ.get("COS_ADMIN_CODE"):
+        return {"ok": False, "error": "管理口令已由服务器环境变量锁定，不能在线修改"}
+    cfg = dict(cos_store.get_config())
+    cfg["admin_code"] = new_code
+    cfg.pop("from_env", None)
+    cos_store.save_config(cfg)
+    return {"ok": True, "msg": "管理口令已保存"}
+
+
 # ---------------- HTTP ----------------
 
 class Handler(BaseHTTPRequestHandler):
@@ -368,6 +538,11 @@ class Handler(BaseHTTPRequestHandler):
             mid = parse_qs(u.query).get("mid", [""])[0]
             self._json({"ok": True, "history": odds_history(mid or None),
                         "msg": "每10分钟自动记录一次赔率，积累初盘→临场变化，供价值回测"})
+        elif p == "/api/suggestions":
+            force = parse_qs(u.query).get("force", ["0"])[0] in ("1", "true")
+            self._json(sug_list(force=force))
+        elif p == "/api/suggestions/status":
+            self._json(sug_status())
         elif not p.startswith("/api/"):
             # 其余静态资源（qr 收款码等图片、前端文件）
             self._serve_static(p[1:] or "index.html")
@@ -465,6 +640,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": True, "forms": forms})
         elif p == "/api/analyze-today":
             self._analyze_today(body)
+        elif p == "/api/suggestions":
+            self._json(sug_add(self, body.get("text", ""), body.get("nick", "")))
+        elif p == "/api/suggestions/like":
+            self._json(sug_like(self, str(body.get("id", ""))))
+        elif p == "/api/suggestions/report":
+            self._json(sug_report(self, str(body.get("id", ""))))
+        elif p == "/api/suggestions/delete":
+            self._json(sug_delete(str(body.get("id", "")), str(body.get("admin", ""))))
+        elif p == "/api/suggestions/admin":
+            self._json(sug_set_admin(self, str(body.get("code", "")), str(body.get("new", ""))))
         elif p == "/api/llm":
             self._llm(body)
         else:

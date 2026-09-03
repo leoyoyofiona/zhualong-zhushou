@@ -45,6 +45,7 @@
     <div class="dd">
       <button id="btn-history" class="btn dd-trigger">📋 历史</button>
       <button id="btn-review" class="btn" title="预测 vs 赛果：各玩法命中率与归因分析">📊 复盘</button>
+      <button id="btn-danmu" class="btn" title="建议弹幕：公开提建议，所有人都能看到">💬 建议</button>
       <button id="btn-theme" class="btn" title="主题：自动/浅色/深色">🌓</button>
       <div class="dd-panel dd-menu">
         <div class="dd-item" data-action="open-history">📋 查看历史记录</div>
@@ -131,6 +132,14 @@
       <label class="field">API Key <input id="llm-key" type="password" placeholder="sk-..."></label>
       <button id="btn-llm-test" class="btn">分析当前数据（试一下）</button>
       <div id="llm-result" class="llm-result"></div>
+      <h4>💬 建议弹幕（公开透明 · 腾讯云 COS 存储）</h4>
+      <p class="hint" id="sug-cfg-state">正在检测建议存储配置…</p>
+      <div class="field-row" id="sug-admin-row">
+        <label class="field">管理口令 <input id="sug-admin-cur" type="password" placeholder="已设置则填当前口令"></label>
+        <label class="field">新口令 <input id="sug-admin-new" type="password" placeholder="设置/修改管理口令"></label>
+        <button id="btn-sug-admin" class="btn">保存口令</button>
+      </div>
+      <div id="sug-cfg-msg" class="llm-result"></div>
     </div>
     <div class="modal-foot">
       <button id="btn-save-settings" class="btn primary">保存</button>
@@ -191,6 +200,30 @@
       <div id="rv-rows" style="max-height:260px;overflow:auto"></div>
       <h4>④ DeepSeek 归因分析</h4>
       <div id="rv-llm" class="llm-result"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 建议弹幕：右下角常驻"弹幕条"，最近建议自动飘过；点击展开完整面板 -->
+<div class="danmu-wrap hidden" id="danmu-wrap">
+  <div class="danmu-ticker" id="danmu-ticker" title="点击展开/收起 建议弹幕面板">
+    <span class="danmu-live">🔴 LIVE</span>
+    <span class="danmu-ticker-text" id="danmu-ticker-text">💬 点这里看看大家给抓龙助手的建议…</span>
+    <span class="danmu-expand">↗</span>
+  </div>
+  <div class="danmu-panel hidden" id="danmu-panel">
+    <div class="danmu-head">
+      <b>💬 建议弹幕</b>
+      <span class="danmu-sub">公开透明 · 所有人都能看到</span>
+      <button id="btn-danmu-close" class="btn small">收起</button>
+    </div>
+    <div class="danmu-stage" id="danmu-stage"><!-- 弹幕飘屏区：由 JS 注入 .danmu-fly --></div>
+    <div class="danmu-hint">新建议会像弹幕一样飘过；以下是全部历史建议（👍=有用，⛔=举报不当内容）。</div>
+    <div class="danmu-list" id="danmu-list"><div class="slip-empty">加载中…</div></div>
+    <div class="danmu-form">
+      <input id="danmu-nick" maxlength="16" placeholder="昵称(可选，默认彩友)">
+      <textarea id="danmu-text" maxlength="300" rows="2" placeholder="写下你的建议，例如：今晚欧冠我觉得皇马会赢，可以多投胜平负…"></textarea>
+      <button id="btn-danmu-send" class="btn primary">📨 发送（公开）</button>
     </div>
   </div>
 </div>

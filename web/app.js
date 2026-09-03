@@ -1677,6 +1677,7 @@ function openSettings() {
   $("b-daily").value = s.budget_daily || APP.budget || 100;
   $("b-monthly").value = s.budget_monthly || "";
   $("b-yearly").value = s.budget_yearly || "";
+  sugStatusRefresh();
 }
 
 function showAllocation() {
@@ -1870,6 +1871,11 @@ function bindEvents() {
   $("btn-settings").onclick = openSettings;
   $("btn-history").onclick = openHistory;
   $("btn-review").onclick = openReview;
+  $("btn-danmu").onclick = danmuToggle;
+  $("btn-danmu-close").onclick = danmuCollapse;
+  $("btn-danmu-send").onclick = danmuSend;
+  $("btn-sug-admin").onclick = sugAdminSave;
+  $("danmu-ticker").onclick = danmuExpand;
   $("btn-theme").onclick = cycleTheme;
   $("btn-save-settings").onclick = saveSettings;
   $("btn-llm-test").onclick = llmTest;
@@ -2043,6 +2049,237 @@ function bindEvents() {
   $("htbody").addEventListener("click", (e) => {
     if (e.target.dataset.saveResult) saveResult(e.target.dataset.saveResult);
   });
+  initDanmu();
+}
+
+/* ---------------- 建议弹幕（公开透明 · 腾讯云 COS 存储） ---------------- */
+
+const DANMU = {
+  items: [],        // 全部可见建议（旧→新）
+  seen: new Set(),  // 已飘屏展示过的 id
+  liked: new Set(), // 本浏览器点过赞的 id
+  reported: new Set(),
+  open: false,      // 面板是否展开
+  queue: [],        // 待飘屏的新建议
+  lastListText: "", // 上次列表渲染指纹（避免整表重建）
+};
+
+function danmuToggle() {
+  if (DANMU.open) danmuCollapse(); else danmuExpand();
+}
+
+function danmuExpand() {
+  DANMU.open = true;
+  $("danmu-wrap").classList.remove("hidden");
+  $("danmu-panel").classList.remove("hidden");
+  $("danmu-ticker").classList.add("danmu-hidden");
+  refreshSuggestions(true);
+  const n = $("danmu-nick");
+  if (n && !n.value) n.value = localStorage.getItem("zucai_danmu_nick") || "";
+  $("danmu-text").focus();
+}
+
+function danmuCollapse() {
+  DANMU.open = false;
+  $("danmu-panel").classList.add("hidden");
+  $("danmu-ticker").classList.remove("danmu-hidden");
+}
+
+function initDanmu() {
+  try { DANMU.liked = new Set(JSON.parse(localStorage.getItem("zucai_danmu_liked") || "[]")); } catch (e) {}
+  try { DANMU.reported = new Set(JSON.parse(localStorage.getItem("zucai_danmu_reported") || "[]")); } catch (e) {}
+  // 常驻右下角弹幕条（可点开完整面板）
+  $("danmu-wrap").classList.remove("hidden");
+  // 首次静默拉取一次（不打扰，仅探活；配置好 COS 前 ticker 显示提示）
+  refreshSuggestions(false).catch(() => {});
+  setInterval(() => { if (!DANMU.open) refreshSuggestions(false).catch(() => {}); }, 30000);
+  setInterval(pumpDanmuQueue, 6000);
+}
+
+async function refreshSuggestions(showError) {
+  const r = await api("/api/suggestions");
+  if (!r.ok) {
+    if (showError && DANMU.open) {
+      const box = $("danmu-list");
+      if (box) box.innerHTML = `<div class="slip-empty">${esc(r.error || "读取失败")}</div>`;
+    }
+    tickerText(`💬 ${esc((r.error || "").slice(0, 46)) || "建议服务暂不可用，稍后再试"}`);
+    return;
+  }
+  const items = r.items || [];
+  const ids = items.map(x => x.id);
+  const fresh = items.filter(x => !DANMU.seen.has(x.id));
+  DANMU.seen = new Set(ids);
+  DANMU.items = items;
+  // 待飘队列：倒序（新的先进面板/先飘）
+  DANMU.queue = DANMU.queue.concat(fresh.reverse()).slice(-30);
+  if (DANMU.open) renderDanmuList(items);
+  else if (items.length) tickerText(lastTicker(items));
+  else tickerText("💬 还没有建议，点这里写下第一条吧！");
+}
+
+function lastTicker(items) {
+  const last = items[items.length - 1];
+  return `💬 ${esc(last.nick)}：${esc(last.text.length > 40 ? last.text.slice(0, 40) + "…" : last.text)}`;
+}
+
+function tickerText(html) {
+  const el = $("danmu-ticker-text");
+  if (el && el.innerHTML !== html) el.innerHTML = html;
+}
+
+function pumpDanmuQueue() {
+  if (DANMU.open && DANMU.queue.length) {
+    const it = DANMU.queue.shift();
+    flyInStage(`<b>${esc(it.nick)}</b>：${esc(it.text)}`);
+  } else if (!DANMU.open && DANMU.queue.length && $("danmu-ticker")) {
+    const it = DANMU.queue.shift();
+    tickerText(`💬 ${esc(it.nick)}：${esc(it.text)}`);
+    // 用背景动画闪烁一下提示"新建议来了"
+    $("danmu-ticker").classList.add("danmu-flash");
+    setTimeout(() => $("danmu-ticker").classList.remove("danmu-flash"), 2200);
+  }
+}
+
+function flyInStage(html) {
+  const stage = $("danmu-stage");
+  if (!stage) return;
+  const el = document.createElement("div");
+  el.className = "danmu-fly";
+  el.innerHTML = html;
+  stage.appendChild(el);
+  const W = stage.clientWidth || 500;
+  const tw = el.scrollWidth || 200;
+  el.style.left = "0px";
+  // 用 WAAPI 从右侧外飘到左侧外，完成即移除
+  const anim = el.animate(
+    [{ transform: `translateX(${W}px)` }, { transform: `translateX(-${tw}px)` }],
+    { duration: 9000, easing: "linear" }
+  );
+  anim.onfinish = () => el.remove();
+}
+
+function timeFmt(t) {
+  const d = new Date(t * 1000);
+  const p = n => String(n).padStart(2, "0");
+  return `${d.getMonth() + 1}-${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function renderDanmuList(items) {
+  const box = $("danmu-list");
+  if (!box) return;
+  if (!items.length) { box.innerHTML = `<div class="slip-empty">还没有建议。写下第一条吧（所有人公开可见）👇</div>`; return; }
+  const fp = items.map(x => `${x.id}|${x.likes}|${x.hidden}`).join(",");
+  if (fp === DANMU.lastListText) return;
+  DANMU.lastListText = fp;
+  const rows = [...items].reverse().map(it => {
+    const liked = DANMU.liked.has(it.id);
+    const reported = DANMU.reported.has(it.id);
+    return `<div class="danmu-item">
+      <div class="danmu-meta"><b>${esc(it.nick)}</b><span>${timeFmt(it.t)}</span></div>
+      <div class="danmu-text">${esc(it.text)}</div>
+      <div class="danmu-acts">
+        <button class="dbtn ${liked ? "on" : ""}" data-like="${esc(it.id)}" ${liked ? "disabled" : ""}>👍 ${it.likes || 0}</button>
+        <button class="dbtn" data-report="${esc(it.id)}" ${reported ? "disabled" : ""}>${reported ? "已举报" : "⛔ 举报"}</button>
+        <button class="dbtn danger" data-del="${esc(it.id)}" title="管理口令删除">🗑 删除</button>
+      </div>
+    </div>`;
+  }).join("");
+  box.innerHTML = rows;
+}
+
+function toastD(msg) { toast(msg); }
+
+function danmuSend() {
+  const text = $("danmu-text").value.trim();
+  if (!text) { toast("写点什么再发送吧"); return; }
+  const nick = $("danmu-nick").value.trim();
+  if (nick) localStorage.setItem("zucai_danmu_nick", nick);
+  const btn = $("btn-danmu-send");
+  const old = btn.textContent;
+  btn.disabled = true; btn.textContent = "发送中…";
+  api("/api/suggestions", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, nick }) }).then(r => {
+    if (!r.ok) { toast(r.error || "发送失败"); return; }
+    $("danmu-text").value = "";
+    toast("已公开，谢谢你的建议！");
+    refreshSuggestions(true);
+  }).catch(e => toast("发送失败：" + e.message))
+    .finally(() => { btn.disabled = false; btn.textContent = old; });
+}
+
+function danmuAct(id, action) {
+  return api(`/api/suggestions/${action}`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id }) });
+}
+
+$("danmu-list").addEventListener("click", (e) => {
+  const like = e.target.closest("[data-like]");
+  if (like) {
+    if (like.disabled) return;
+    like.disabled = true;
+    danmuAct(like.dataset.like, "like").then(r => {
+      if (!r.ok) { toast(r.error || "点赞失败"); like.disabled = false; return; }
+      DANMU.liked.add(like.dataset.like);
+      localStorage.setItem("zucai_danmu_liked", JSON.stringify([...DANMU.liked]));
+      toast("👍 已点赞");
+      refreshSuggestions(true);
+    }).catch(() => { like.disabled = false; toast("点赞失败"); });
+    return;
+  }
+  const rep = e.target.closest("[data-report]");
+  if (rep) {
+    if (rep.disabled || rep.textContent.includes("已举报")) return;
+    rep.disabled = true;
+    danmuAct(rep.dataset.report, "report").then(r => {
+      if (!r.ok) { toast(r.error || "举报失败"); rep.disabled = false; return; }
+      DANMU.reported.add(rep.dataset.report);
+      localStorage.setItem("zucai_danmu_reported", JSON.stringify([...DANMU.reported]));
+      toast(r.msg || "已举报");
+      if (r.hidden) refreshSuggestions(true);
+    }).catch(() => { rep.disabled = false; toast("举报失败"); });
+    return;
+  }
+  const del = e.target.closest("[data-del]");
+  if (del) {
+    const code = prompt("请输入管理口令删除这条建议：");
+    if (!code) return;
+    api("/api/suggestions/delete", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: del.dataset.del, admin: code }) }).then(r => {
+      if (!r.ok) { toast(r.error || "删除失败"); return; }
+      toast("已删除");
+      refreshSuggestions(true);
+    }).catch(() => toast("删除失败"));
+    return;
+  }
+});
+
+function sugStatusRefresh() {
+  const el = $("sug-cfg-state");
+  if (!el) return;
+  api("/api/suggestions/status").then(r => {
+    if (!r.ok) { el.innerHTML = `<span class="err">${esc(r.error || "状态读取失败")}</span>`; return; }
+    if (r.configured) {
+      el.innerHTML = `<span style="color:var(--good,#16a34a)">✅ 已配置 · 建议保存在 COS 桶 <b>${esc(r.bucket)}</b>（${esc(r.region)}），重启/换设备都不丢。</span>`;
+    } else {
+      el.innerHTML = `<span style="color:var(--warn)">⚠️ 未配置 COS（服务器环境变量 COS_SECRET_ID/COS_SECRET_KEY/COS_BUCKET/COS_REGION）。未配置时建议只存内存，重启即丢。</span>`;
+    }
+    $("btn-sug-admin").disabled = !r.configured;
+  }).catch(() => {});
+}
+
+function sugAdminSave() {
+  const cur = $("sug-admin-cur").value.trim();
+  const nw = $("sug-admin-new").value.trim();
+  if (!nw) { toast("请填写新口令"); return; }
+  api("/api/suggestions/admin", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code: cur, new: nw }) }).then(r => {
+    const out = $("sug-cfg-msg");
+    if (!r.ok) { out.innerHTML = `<div class="err">❌ ${esc(r.error)}</div>`; return; }
+    $("sug-admin-cur").value = ""; $("sug-admin-new").value = "";
+    out.innerHTML = `<div style="color:var(--good,#16a34a)">✅ ${esc(r.msg)}</div>`;
+    sugStatusRefresh();
+  }).catch(e => { $("sug-cfg-msg").innerHTML = `<div class="err">请求失败: ${esc(e.message)}</div>`; });
 }
 
 /* 只更新某张卡片的成功率面板（以及传统足彩的注数行），不重建卡片。
