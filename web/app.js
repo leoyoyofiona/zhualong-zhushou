@@ -2076,6 +2076,8 @@ const DANMU = {
 };
 const DANMU_ROTATE_N = 10;  // 循环轮播最近 N 条
 const FLY_COLORS = ["#2563eb", "#0ea5e9", "#7c3aed", "#0d9488", "#db2777", "#ea580c"];
+const DANMU_LANES = 3;      // 轨道分3行，多行弹幕并行、按行轮转不追尾
+const DANMU_TEXT_MAX = 30;  // 弹幕展示最多30字，超出省略(完整内容在弹幕面板与悬停title可见)
 
 function danmuMainOn(on) {
   DANMU.mainOn = on;
@@ -2181,18 +2183,17 @@ function updateDanmuBadge() {
   b.classList.toggle("hidden", !DANMU.unseen);
 }
 
-/* 顶部弹幕调度：一条接一条循环，上一条完全滚出后留出空档(间距)再滚下一条 */
+/* 弹幕调度：所有弹幕按固定间隔一条接一条上场，不等待上一条滚完。
+   所有弹幕同速(60px/s)同线滚动 → 入场间隔恒定，前后条保持固定间距、互不追尾。 */
 function tickDanmu() {
   if (!DANMU.mainOn || document.hidden) return;
   const tr = $("danmu-track");
   if (!tr) return;
-  // 轨道上一次只滚一条：上一条滚完前不挤入下一条
-  if (tr.querySelector(".danmu-fly")) return;
-  // 上一条刚滚完：留出 ~2.5s 空档(两条之间保留间距)，不立刻接上
-  if (DANMU.lastFlyEnd && (Date.now() - DANMU.lastFlyEnd) < 2500) return;
+  // 同屏上限：防弹幕过多挤在一起(入场间隔4.2s × 单条滚动时长决定自然同屏数)
+  if (DANMU.active >= 8) return;
   let id = null;
   if (DANMU.newQ.length) {
-    id = DANMU.newQ.shift();   // 新发言：优先插播
+    id = DANMU.newQ.shift();   // 新发言：优先上场
   } else if (DANMU.cycle.length) {
     id = DANMU.cycle[DANMU.cycleIdx % DANMU.cycle.length];
     DANMU.cycleIdx++;
@@ -2213,22 +2214,28 @@ function flyInTrack(it) {
   const color = FLY_COLORS[(it.nick || "").length % FLY_COLORS.length];
   const liked = DANMU.liked.has(it.id);
   const n = Number(it.likes) || 0;
-  // 弹幕结构：昵称 + 文字 + 点赞(👍数量，悬停时放大会拇指)。liked 表示本浏览器已赞过
-  el.innerHTML = `<span class="df-nick">${esc(it.nick)}</span><span class="df-txt">${esc(it.text)}</span>
+  // 多行轮转：3 行并行，同一行内前后条保持速度*行间隔>条宽的间距，互不追尾
+  DANMU.laneSeq = (typeof DANMU.laneSeq === "number" ? DANMU.laneSeq : -1) + 1;
+  const lane = DANMU.laneSeq % DANMU_LANES;
+  el.style.top = (2 + lane * 31) + "px";
+  // 文本超长省略(完整内容见悬停title与弹幕面板列表)，避免长条追尾
+  const fullText = it.text || "";
+  const dispText = fullText.length > DANMU_TEXT_MAX ? fullText.slice(0, DANMU_TEXT_MAX) + "…" : fullText;
+  el.innerHTML = `<span class="df-nick">${esc(it.nick)}</span><span class="df-txt">${esc(dispText)}</span>
     <button class="df-like${liked ? " liked" : ""}" data-like="${esc(it.id)}" title="点👍给这条弹幕点个赞">👍 <b>${n}</b></button>`;
+  if (fullText.length > DANMU_TEXT_MAX) el.title = `${it.nick || "彩友"}：${fullText}`;
   el.style.background = color;
   tr.appendChild(el);
   const W = tr.clientWidth || document.documentElement.clientWidth || 1200;
   const tw = el.scrollWidth || 260;
   DANMU.active++;
-  // 慢速弹幕：按 ~60px/s 匀速滚过整条轨道(文字越长耗时越久)，下限9s保证可读
+  // 慢速弹幕：统一 ~60px/s 匀速滚动
   const dist = W + tw + 120;
-  const dur = Math.min(48000, Math.max(9000, Math.round(dist / 60 * 1000)));
+  const dur = Math.max(6000, Math.round(dist / 60 * 1000));
   const startX = W + 40, endX = -(tw + 60);
   const finish = () => {
     el.remove();
     DANMU.active = Math.max(0, DANMU.active - 1);
-    DANMU.lastFlyEnd = Date.now();   // 记录滚完时刻：下一条要等间距空档
     // 兜底：万一动画没触发也释放计数
     setTimeout(() => { if (!el.isConnected) DANMU.active = Math.max(0, DANMU.active - 1); }, 200);
   };
