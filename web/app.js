@@ -1349,7 +1349,9 @@ async function analyzeToday() {
   btn.textContent = "⏳ 正在分析（DeepSeek 可能需1-2分钟）…";
   btn.disabled = true;
   const out = $("analyze-out");
-  out.innerHTML = '<p style="color:var(--dim)">后台整合：官方/备用源赔率 → 概率模型 → 资金分配 → 深度统筹…</p>';
+  out.innerHTML = '<p style="color:var(--dim)">后台执行：采集当日比赛赔率 → 概率模型 → 资金分配 → 两队近期战绩' + (llmCfg().api_key ? ' → DeepSeek 深度统筹' : '') + '…（约10-60秒）</p>';
+  const hint = $("analyze-llm-hint");
+  if (hint) hint.textContent = llmCfg().api_key ? "" : "（未填 Key：仅内置引擎）";
   $("modal-analyze").classList.remove("hidden");
   try {
     const budgets = readBudgets();
@@ -1373,41 +1375,81 @@ function readBudgets() {
   return { daily: num("b-daily", 100), monthly: num("b-monthly", 0), yearly: num("b-yearly", 0) };
 }
 
+function prettyLLM(lr) {
+  let h = "";
+  if (!lr || typeof lr !== "object") return `<div class="llm-result">${esc(JSON.stringify(lr, null, 2))}</div>`;
+  if (lr.summary) h += `<div class="llm-sum">📌 ${esc(lr.summary)}</div>`;
+  const plans = lr.plans || {};
+  if (plans.had && plans.had.length) {
+    h += "<div style='font-size:13px;font-weight:700;margin:8px 0 4px'>胜平负建议</div><table class='htable'><tr><th>场次</th><th>选择</th><th>金额</th><th>理由</th></tr>";
+    for (const p of plans.had.slice(0, 14)) {
+      const stake = p.stake === undefined || p.stake === null ? "" : `${p.stake}元`;
+      h += `<tr><td>${esc(p.match || "")}</td><td><b>${esc(p.pick || "")}</b></td><td>${esc(String(stake))}</td><td style="font-size:11px;color:var(--dim)">${esc(p.reason || "")}</td></tr>`;
+    }
+    h += "</table>";
+  }
+  const otherPlans = Object.entries(plans).filter(([k]) => k !== "had" && k !== "zucai14");
+  if (plans.zucai14) {
+    h += `<div style="font-size:12px;margin-top:6px"><b>胜负彩14场建议：</b>${esc(JSON.stringify(plans.zucai14))}</div>`;
+  }
+  for (const [k, v] of otherPlans) {
+    if (v == null || (Array.isArray(v) && !v.length)) continue;
+    h += `<div style="font-size:12px;margin-top:4px"><b>${esc(POOL_CN[k] || k)}：</b>${esc(typeof v === "string" ? v : JSON.stringify(v))}</div>`;
+  }
+  if (lr.risks && lr.risks.length) {
+    h += `<div style="font-size:12px;color:var(--warn);margin-top:8px">⚠️ ${lr.risks.map(x => esc(typeof x === "string" ? x : JSON.stringify(x))).join("<br>⚠️ ")}</div>`;
+  }
+  if (!h) h = `<div class="llm-result">${esc(JSON.stringify(lr, null, 2))}</div>`;
+  return `<div class="llm-result" style="white-space:normal">${h}</div>`;
+}
+
 function renderAnalyzeResult(r) {
   const out = $("analyze-out");
   const alloc = (r.allocation && r.allocation.allocation) || {};
   const adv = (r.allocation && r.allocation.advice) || [];
-  let html = "<h4>📐 资金分配（按日预算）</h4><table class='htable' style='margin-bottom:8px'><tr><th>玩法</th><th>分配(元)</th></tr>";
+  const hasLlm = !!(r.llm && r.llm.ok);
+  let html = "";
+  // ① 最终结论框
+  const llmSummary = r.llm && r.llm.ok && r.llm.result && r.llm.result.summary;
+  html += `<div class="final-box"><b>🎯 今日方案结论</b><br>
+    预算 ${fmt(r.plan.budget)} 元 → 内置模型方案 ${fmt(r.plan.total_recommended)} 元
+    ${hasLlm ? " + DeepSeek 统筹（见下方 🤖）" : "（未填 DeepSeek Key，仅内置引擎；设置里填 Key 后可获得 AI 统筹）"}
+    ${llmSummary ? `<div style="margin-top:4px">📌 ${esc(llmSummary)}</div>` : ""}
+    <div style="margin-top:4px;color:var(--dim);font-size:12px">点底部"✅ 采用此方案进投注单"把方案装入投注单 → 复制文本/生成截图发彩票店。</div></div>`;
+  // ② 资金分配
+  html += "<h4>① 资金分配（按日预算）</h4><table class='htable' style='margin-bottom:8px'><tr><th>玩法</th><th>分配(元)</th></tr>";
   for (const [k, v] of Object.entries(alloc.daily || {})) html += `<tr><td>${esc(POOL_CN[k] || k)}</td><td>${fmt(v)}</td></tr>`;
   html += "</table><div style='font-size:11px;color:var(--dim)'>" + adv.map(esc).join("<br>") + "</div>";
-  html += `<h4>⚙️ 内置模型方案（${fmt(r.plan.total_recommended)} 元 / 预算 ${fmt(r.plan.budget)} 元）</h4>`;
+  // ③ 内置方案明细
+  html += `<h4>② 内置模型方案（${fmt(r.plan.total_recommended)} 元）</h4>`;
   for (const [pool, pl] of Object.entries(r.plan.plans || {})) {
     const spent = pl.spent || (pl.ticket ? pl.ticket.stake : 0) || 0;
     if (spent > 0) html += `<div style="font-size:12px">· ${esc(pl.label)}：约 ${fmt(spent)} 元</div>`;
   }
+  // ④ 战绩 / 赔率变化
   if (r.forms && r.forms.length) {
-    html += "<h4>📈 近期战绩（500 liansai 实时）</h4>";
+    html += "<h4>③ 两队近期战绩</h4>";
     for (const f of r.forms) {
       if (!f.text || !f.text.length) continue;
       html += `<div style="font-size:12px;background:var(--card2);border:1px solid var(--line);border-radius:8px;padding:6px 8px;margin-bottom:6px"><b>${esc(f.home)} vs ${esc(f.away)}</b><br>${f.text.map(esc).join("<br>")}</div>`;
     }
   }
   if (r.moves && Object.keys(r.moves).length) {
-    html += "<h4>📉 赔率变化（相对上次采样）</h4>";
+    html += "<h4>④ 赔率变化（资金流向参考）</h4>";
     for (const [mid, mm] of Object.entries(r.moves).slice(0, 8)) {
       const bits = [];
       for (const [pool, d] of Object.entries(mm)) for (const [k, v] of Object.entries(d))
-        bits.push(`${pool === "hhad" ? "让球" : "胜平负"}.${k} ${v.prev}→${v.now} (${v.dir === "down" ? "↓热" : v.dir === "up" ? "↑冷" : "平"})`);
+        bits.push(`${pool === "hhad" ? "让球" : "胜平负"}·${k} ${v.prev}→${v.now} (${v.dir === "down" ? "↓受热" : v.dir === "up" ? "↑走冷" : "平"})`);
       if (bits.length) html += `<div style="font-size:11px;color:var(--dim)">${esc(mid)}：${bits.map(esc).join("；")}</div>`;
     }
   }
+  // ⑤ LLM
   if (r.llm) {
-    html += "<h4>🤖 DeepSeek 统筹建议</h4>";
+    html += "<h4>⑤ 🤖 DeepSeek 统筹建议</h4>";
     if (r.llm.ok) {
-      const lr = r.llm.result || {};
-      html += `<div class="llm-result">${esc(JSON.stringify(lr, null, 2))}</div>`;
+      html += prettyLLM(r.llm.result || {});
     } else {
-      html += `<div class="llm-result err">❌ ${esc(r.llm.error)}<br><small>未填 Key 则只显示内置引擎方案；在 设置→大模型分析 填入后重试。</small></div>`;
+      html += `<div class="llm-result err">${esc(r.llm.error)}</div>`;
     }
   }
   out.innerHTML = html;

@@ -472,3 +472,19 @@ html[data-theme="dark"] .opt.sel .ov { color: #fff; }
 .mover.cold { color: #16a34a; }  /* 赔率上升=走冷，绿升 */
 html[data-theme="dark"] .mover.hot { color: #f87171; }
 html[data-theme="dark"] .mover.cold { color: #4ade80; }
+
+/* 今日投注分析 面板 */
+.analyze-hint {
+  font-size: 12px; color: var(--dim); background: var(--card2);
+  border: 1px dashed var(--line); border-radius: 8px; padding: 7px 10px; margin-bottom: 10px;
+}
+.final-box {
+  font-size: 13px; padding: 10px 12px; border-radius: 10px; margin-bottom: 10px;
+  background: linear-gradient(120deg, rgba(37,99,235,.08), rgba(124,58,237,.08));
+  border: 1px solid rgba(37,99,235,.3);
+}
+.llm-sum {
+  font-size: 13px; font-weight: 600; padding: 6px 8px; border-radius: 8px;
+  background: rgba(34,197,94,.12); color: var(--accent2); margin-bottom: 6px;
+}
+html[data-theme="dark"] .analyze-hint { color: #93a1bd; }

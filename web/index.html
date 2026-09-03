@@ -157,7 +157,11 @@
   <div class="modal-box wide">
     <div class="modal-head">🎯 今日投注分析 <button class="modal-close" data-close="modal-analyze">×</button></div>
     <div class="modal-body">
-      <div id="analyze-out"><p style="color:var(--dim)">点击"今日投注分析"后在此查看结果。</p></div>
+      <div class="analyze-hint">
+        流程：<b>预算</b> → 采集体彩当日比赛赔率 → 概率模型 → <b>资金分配</b> → 两队近期战绩
+        <span id="analyze-llm-hint" style="color:var(--warn)">（填了 DeepSeek Key 会追加 AI 深度统筹）</span> → <b>今日最终方案</b>
+      </div>
+      <div id="analyze-out"><p style="color:var(--dim)">点击下方"🎯 今日投注分析"后，此处自动生成：资金分配表、内置模型方案、近期战绩、赔率变化、（可选）DeepSeek 建议。<br>看完点"✅ 采用此方案进投注单"即可去复制/截图发彩票店。</p></div>
     </div>
     <div class="modal-foot">
       <button id="btn-analyze-adopt" class="btn primary">✅ 采用此方案进投注单</button>
