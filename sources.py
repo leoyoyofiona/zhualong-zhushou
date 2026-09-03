@@ -366,6 +366,8 @@ def fetch_jczq_500():
             # 球队 id（liansai 分析页）与联赛排名
             ids = re.findall(r'liansai\.500\.com/team/(\d+)/', r)
             ranks = re.findall(r'title="排名第(\d+)"', r)
+            # 500.com 页面上单关标记：<span class="ico-dg">单关</span>（出现在不让球玩法行内）
+            single_ok = "ico-dg" in r
             home_id = ids[0] if ids else None
             away_id = ids[1] if len(ids) >= 2 else None
             rank_h = int(ranks[0]) if ranks else None
@@ -411,6 +413,7 @@ def fetch_jczq_500():
                 "away_id": away_id,
                 "rank_h": rank_h,
                 "rank_a": rank_a,
+                "single_ok": single_ok,
             })
         except Exception:  # noqa: BLE001
             continue

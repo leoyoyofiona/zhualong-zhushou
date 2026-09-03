@@ -181,6 +181,13 @@ function tktRow(no, teams, pick) {
   return `<div class="tkt-row"><span class="c-no">${esc(no)}</span><span class="c-tm">${esc(teams)}</span><span class="c-pk">${esc(pick)}</span></div>`;
 }
 
+/* 该场次是否开售单关（体彩规则：未开售单关的场次只能以过关/串关方式投注） */
+function singleOkOf(mid) {
+  const ml = (APP.data && APP.data.jczq && APP.data.jczq.matches) || [];
+  const m = ml.find(x => x.id === mid);
+  return m ? m.single_ok !== false : true;
+}
+
 function pickText(pool, option) {
   let p = option;
   if (pool === "hafu") p = String(option).replace(/-/g, "");
@@ -1127,9 +1134,13 @@ function renderSlip() {
       serial = "单关";
       notes = g.items.length;
       stake = g.items.reduce((s, x) => s + (Number(x.stake) || 0), 0);
-      rows = g.items.map(it => tktRow(it.mid, `${it.home} VS ${it.away}`, `${GAME_SHORT[g.pool]}  ${pickText(g.pool, it.option)}@${fmt(it.odds)}`)).join("");
+      rows = g.items.map(it => {
+        const bad = !singleOkOf(it.mid);
+        const warn = bad ? " ⚠未开售单关" : "";
+        return tktRow(it.mid, `${it.home} VS ${it.away}`, `${GAME_SHORT[g.pool]}  ${pickText(g.pool, it.option)}@${fmt(it.odds)}${warn}`);
+      }).join("");
       editBox = g.items.map(it => `<div class="tkt-edit-row">
-        <span>${esc(it.mid)} ${esc(it.home)} VS ${esc(it.away)} ${esc(pickText(g.pool, it.option))}@${fmt(it.odds)}</span>
+        <span>${esc(it.mid)} ${esc(it.home)} VS ${esc(it.away)} ${esc(pickText(g.pool, it.option))}@${fmt(it.odds)}${singleOkOf(it.mid) ? "" : ' <b style="color:var(--danger)">⚠ 该场未开售单关，只能走串关/过关，请改用下方串关建议或过关模式</b>'}</span>
         <input class="st" type="number" min="2" step="2" value="${it.stake}" data-stake="${g.pool}|${esc(keyOf(it.mid, it.option))}">
         <button class="rm" data-rm="${g.pool}|${esc(keyOf(it.mid, it.option))}">移除</button></div>`).join("");
       prize = jczqPrizeRange(g.pool);

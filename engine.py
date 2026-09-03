@@ -368,8 +368,13 @@ def _apply_stakes(picks, alloc, min_stake=2.0, max_per_type=None):
 
 
 def plan_jczq_singles(data, weights, budget, mode="normal"):
-    """竞彩四池的单关方案（让球胜平负已按用户要求移除）。"""
+    """竞彩四池方案（让球胜平负已按用户要求移除）。
+    体彩规则：仅带"单关"标记的场次可单场投注；其余场次必须串关。
+    因此：不可单关场次的推荐不进"单关票"，自动组进 2串1/3串1。"""
     matches = (data.get("jczq") or {}).get("matches") or []
+    # single_ok：None(官方源未提供)视为可单关，避免误删
+    single_map = {m.get("id"): (True if m.get("single_ok") is None else bool(m.get("single_ok")))
+                  for m in matches}
     out = {}
     specs = {
         "had": ("胜平负", THREE_LABELS),
@@ -378,32 +383,54 @@ def plan_jczq_singles(data, weights, budget, mode="normal"):
         "hafu": ("半全场", {}),
     }
     for pool, (label, opt_labels) in specs.items():
-        alloc = budget * weights.get(pool, 0.05)
+        alloc = budget * weights.get(pool, 0.0)
         plan = plan_pool(matches, pool, alloc, label, opt_labels, mode=mode)
-        # 胜平负预留 6 元给串关（2串1/3串1），其余玩法全额给单关
+        # 无"单关"标记的场次：不能单场投注 → 单注清零，改由串关承载
+        for p in plan["picks"]:
+            if single_map.get(p.get("id"), True) is False:
+                p["stake"] = 0
+                if "仅串" not in p["tags"]:
+                    p["tags"].append("仅串")
+        # 胜平负预留 6 元给串关（2串1/3串1），其余玩法全额给单关；
+        # 单关金额只分给可单关场次的推荐，避免名额被"仅串"场次占用
         combos_reserve = 6.0 if pool == "had" else 0.0
         singles_budget = max(alloc - combos_reserve, 0.0)
-        # 每类推荐限注数，保证方案多样：稳胆/首选为主，防平/次选/价值打辅助
         if pool == "had":
             cap = {"稳胆": 2, "防平": 2, "首选": 2, "价值": 1}
         else:
             cap = {"首选": 2, "次选": 1, "价值": 1}
-        plan["spent"] = _apply_stakes(plan["picks"], singles_budget, max_per_type=cap)
-        # 串关建议（2串1/3串1，与体彩"过关"玩法一致）：从中赔首选/稳胆里挑组合
-        locks = [p for p in plan["picks"] if (("稳胆" in p["tags"]) or ("首选" in p["tags"]))
-                 and 1.4 <= p["odds"] <= 2.8 and p["prob"] >= 0.45]
+        stakable = [p for p in plan["picks"]
+                    if single_map.get(p.get("id"), True) is not False]
+        plan["spent"] = _apply_stakes(stakable, singles_budget, max_per_type=cap)
+        # 串关建议（2串1/3串1，与体彩"过关"玩法一致）：同玩法任意场次可串
+        # （含无"单关"标记的"仅串"场），但同一注内不出现同一场两个选项。
+        # had 用严格门槛；ttg/crs/hafu 门槛放宽，保证这些玩法也有过关方案可投。
+        cp2 = 0.20 if pool == "had" else (0.05 if pool == "ttg" else 0.02)
+        cp3 = 0.08 if pool == "had" else (0.02 if pool == "ttg" else 0.008)
+        max_combos = 4 if pool == "had" else 2
+        if pool == "had":
+            locks = [p for p in plan["picks"]
+                     if ("稳胆" in p["tags"] or "首选" in p["tags"])
+                     and 1.4 <= p["odds"] <= 2.8 and p["prob"] >= 0.45]
+        else:
+            # 列表池：所有推荐的该场代表（prob 最高者），排除纯参考的"博高"
+            locks = [p for p in plan["picks"]
+                     if p.get("recommended") and "博高" not in p["tags"]
+                     and p["odds"] <= 20.0]
+        by_mid = {}
+        for p in sorted(locks, key=lambda x: -x["prob"]):
+            by_mid.setdefault(p["id"], p)
+        locks = list(by_mid.values())
         combos = []
-        if len(locks) >= 2 and pool in ("had",):
+        if len(locks) >= 2:
             cand = []
             n = len(locks)
             for i in range(n):
                 for j in range(i + 1, n):
                     a, b = locks[i], locks[j]
-                    if a["id"] == b["id"]:
-                        continue
                     cp = a["prob"] * b["prob"]
                     om = round(a["odds"] * b["odds"], 2)
-                    if cp >= 0.20 and om >= 2.0:
+                    if cp >= cp2 and om >= 2.0:
                         cand.append((cp, om, 2, [a, b]))
             for i in range(n):
                 for j in range(i + 1, n):
@@ -413,12 +440,11 @@ def plan_jczq_singles(data, weights, budget, mode="normal"):
                             continue
                         cp = a["prob"] * b["prob"] * c["prob"]
                         om = round(a["odds"] * b["odds"] * c["odds"], 2)
-                        if cp >= 0.08 and om >= 3.0:
+                        if cp >= cp3 and om >= 3.0:
                             cand.append((cp, om, 3, [a, b, c]))
             cand.sort(key=lambda x: -x[0])
             combos_budget = max(alloc - plan["spent"], 0)
-            combo_count = min(4, int(combos_budget // 2))  # 每注2元
-            # 2串1 与 3串1 交错择优（先各取最优，再轮流补位），兼顾把握与多样性
+            combo_count = min(max_combos, int(combos_budget // 2))  # 每注2元
             cand2 = [c for c in cand if c[2] == 2]
             cand3 = [c for c in cand if c[2] == 3]
             ordered_cand = []
@@ -448,6 +474,25 @@ def plan_jczq_singles(data, weights, budget, mode="normal"):
                 })
                 added += 1
             plan["spent"] = round(plan["spent"] + added * 2.0, 2)
+        # 兜底：若该池有推荐却连一注都投不出（如"仅串"场次概率门槛未过），
+        # 强制从概率最高的两场不同比赛组一注 2串1，保证"总有方案可投"
+        if not combos:
+            need = [p for p in locks if p["prob"] >= 0.04]
+            need.sort(key=lambda p: -p["prob"])
+            if len(need) >= 2 and need[0]["id"] != need[1]["id"] and (alloc - plan["spent"]) >= 2:
+                a, b = need[0], need[1]
+                combos.append({
+                    "match_a": f"{a['id']} {a['league']} {a['home']} VS {a['away']} {a['option']}@{a['odds']}",
+                    "match_b": f"{b['id']} {b['league']} {b['home']} VS {b['away']} {b['option']}@{b['odds']}",
+                    "match_c": None, "serial": 2,
+                    "odds": round(a["odds"] * b["odds"], 2), "prob": round(a["prob"] * b["prob"], 3),
+                    "stake": 2.0,
+                    "matches": [{"id": a["id"], "league": a["league"], "home": a["home"],
+                                 "away": a["away"], "option": a["option"], "odds": a["odds"]},
+                                {"id": b["id"], "league": b["league"], "home": b["home"],
+                                 "away": b["away"], "option": b["option"], "odds": b["odds"]}],
+                })
+                plan["spent"] = round(plan["spent"] + 2.0, 2)
         plan["combos"] = combos
         out[pool] = plan
     return out
