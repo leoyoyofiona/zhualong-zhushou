@@ -686,7 +686,7 @@ html[data-theme="dark"] .visit-stats b { color: #60a5fa; }
 @media (max-width: 720px) {
   .visit-stats { font-size: 10.5px; }
   .visit-stats b { font-size: 11px; }
-  .visit-stats .vs2, .visit-stats .vs4 { display: none; }  /* 窄屏省空间 */
+  .visit-stats .vs3 { display: none; }  /* 窄屏省空间：隐藏“今日浏览” */
 }
 
 /* 管理登录行 */

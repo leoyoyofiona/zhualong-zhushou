@@ -2631,18 +2631,11 @@ async function refreshVisitStats() {
 
 function renderVisitStats(r) {
   if (!r || !r.ok) return;
-  const set = (idx, v) => {
-    const el = document.querySelector(`#visit-stats b[data-v="${idx}"]`);
-    if (el) el.textContent = v;
-  };
-  // 各段数字用 <b data-v=".."> 便于只更新数值
   const box = $("visit-stats");
-  if (box) {
-    box.innerHTML = `<span class="vs1">📊 本站累计访问 <b data-v="total">${r.total}</b> 次</span>` +
-      `<span class="vs2">· 今日 <b data-v="tc">${r.today_count}</b> 次</span>` +
-      `<span class="vs3">· 累计 <b data-v="uv">${r.visitors}</b> 位访客</span>` +
-      `<span class="vs4">· 今日 <b data-v="tuv">${r.today_visitors}</b> 位</span>`;
-  }
+  if (!box) return;
+  box.innerHTML = `<span class="vs1">📊 累计访问 <b data-v="uv">${r.visitors}</b> 人</span>` +
+    `<span class="vs2">· 累计浏览 <b data-v="total">${r.total}</b> 次</span>` +
+    `<span class="vs3">· 今日浏览 <b data-v="tc">${r.today_count}</b> 次</span>`;
 }
 
 async function init() {
