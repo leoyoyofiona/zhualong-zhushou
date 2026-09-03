@@ -512,14 +512,21 @@ def sug_set_admin(handler, code: str, new_code: str):
 
 
 def sug_admin_login(handler, code: str):
-    """管理入口登录：口令正确返回全量建议（含被举报自动隐藏的），便于管理删除。"""
+    """管理入口登录：口令正确即可进入管理；列表优先实时读 COS，
+    若 COS 暂时超时(网络抖动)则退回缓存/空列表，不阻塞登录。"""
     if not _sug_admin_ok(code):
         return {"ok": False, "error": "站密码不正确"}
+    items = []
+    warn = ""
     try:
         items = _sug_load(force=True)
-        return {"ok": True, "items": _sug_visible(items, is_admin=True)}
     except Exception as e:  # noqa: BLE001
-        return {"ok": False, "error": f"读取失败: {e}"}
+        warn = f"（列表读取暂不可用: {str(e)[:60]}，稍后自动重试）"
+        try:
+            items = _sug_load(force=False)  # 退回缓存
+        except Exception:  # noqa: BLE001
+            items = []
+    return {"ok": True, "items": _sug_visible(items, is_admin=True), "warn": warn}
 
 
 def sug_clear(handler, code: str):

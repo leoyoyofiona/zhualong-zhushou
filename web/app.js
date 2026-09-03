@@ -1876,8 +1876,11 @@ function bindEvents() {
   $("btn-danmu-send").onclick = danmuSend;
   $("btn-sug-admin").onclick = sugAdminSave;
   $("btn-danmu-admin").onclick = danmuAdminLogin;
+  $("btn-danmu-admin-go").onclick = danmuAdminGo;
   $("btn-danmu-admin-exit").onclick = danmuAdminExit;
   $("btn-danmu-clear").onclick = danmuAdminClear;
+  const _pwd = $("danmu-admin-pwd");
+  if (_pwd) _pwd.addEventListener("keydown", (e) => { if (e.key === "Enter") danmuAdminGo(); });
   $("danmu-fab").onclick = danmuToggle;
   $("btn-theme").onclick = cycleTheme;
   $("btn-save-settings").onclick = saveSettings;
@@ -2374,28 +2377,47 @@ function renderDanmuList(items, isAdmin) {
 
 function toastD(msg) { toast(msg); }
 
-/* ---------------- 管理入口（站密码） ---------------- */
+/* ---------------- 管理入口（站密码，面板内输入，不依赖浏览器弹窗） ---------------- */
 
 function danmuAdminLogin() {
   if (DANMU.admin) { toast("已在管理模式中"); return; }
-  const code = prompt("输入站密码进入管理：可删除某条 / 恢复被举报隐藏的 / 一键清空全部。");
-  if (!code) return;
+  const bar = $("danmu-adminbar");
+  if (bar) {
+    bar.classList.remove("hidden");
+    bar.classList.remove("authed");
+  }
+  const pwd = $("danmu-admin-pwd");
+  if (pwd) { pwd.value = ""; pwd.focus(); }
+}
+
+function danmuAdminGo() {
+  const pwd = $("danmu-admin-pwd");
+  const code = pwd ? pwd.value.trim() : "";
+  if (!code) { toast("请输入站密码"); pwd && pwd.focus(); return; }
+  const go = $("btn-danmu-admin-go");
+  if (go) { go.disabled = true; }
   api("/api/suggestions/login", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ admin: code }) }).then(r => {
-    if (!r.ok) { toast(r.error || "站密码不正确"); return; }
+    if (!r.ok) { toast(r.error || "站密码不正确"); if (go) go.disabled = false; return; }
+    if (r.warn) toast(r.warn);
     DANMU.admin = code;
     DANMU.adminList = r.items || [];
-    $("danmu-adminbar").classList.remove("hidden");
+    const bar = $("danmu-adminbar");
+    if (bar) { bar.classList.add("authed"); bar.classList.remove("hidden"); }
     $("btn-danmu-admin").textContent = "👑 管理中";
     renderDanmuList(DANMU.adminList, true);
     toast("已进入管理模式：删除/恢复/清空可用");
-  }).catch(e => toast("登录失败：" + e.message));
+  }).catch(e => {
+    toast("登录失败：" + e.message);
+    if (go) go.disabled = false;
+  });
 }
 
 function danmuAdminExit() {
   DANMU.admin = null;
   DANMU.adminList = null;
-  $("danmu-adminbar").classList.add("hidden");
+  const bar = $("danmu-adminbar");
+  if (bar) { bar.classList.add("hidden"); bar.classList.remove("authed"); }
   $("btn-danmu-admin").textContent = "🔐 管理";
   DANMU.lastListText = "";
   refreshSuggestions(true);

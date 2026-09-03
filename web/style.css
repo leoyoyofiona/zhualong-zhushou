@@ -688,3 +688,14 @@ html[data-theme="dark"] .visit-stats b { color: #60a5fa; }
   .visit-stats b { font-size: 11px; }
   .visit-stats .vs2, .visit-stats .vs4 { display: none; }  /* 窄屏省空间 */
 }
+
+/* 管理登录行 */
+.danmu-adminbar .admin-login-row { display: flex; align-items: center; gap: 6px; width: 100%; }
+.danmu-adminbar input#danmu-admin-pwd {
+  flex: 1; min-width: 120px; border: 1px solid var(--line); border-radius: 8px;
+  padding: 5px 9px; font: inherit; background: #fff; color: var(--text);
+}
+html[data-theme="dark"] .danmu-adminbar input#danmu-admin-pwd { background: rgba(30,41,59,.7); color: #e6ecf7; }
+.danmu-adminbar:not(.authed) .admin-tag, .danmu-adminbar:not(.authed) #btn-danmu-clear,
+.danmu-adminbar:not(.authed) #btn-danmu-admin-exit, .danmu-adminbar:not(.authed) .admin-tip { display: none; }
+.danmu-adminbar.authed .admin-login-row { display: none; }
