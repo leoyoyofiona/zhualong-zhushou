@@ -2070,6 +2070,7 @@ const DANMU = {
   lastListText: "", // 列表渲染指纹
   unseen: 0,        // 新建议角标计数
   active: 0,        // 当前主页正在飘的条数
+  lastFlyEnd: 0,    // 上一条弹幕滚完的时刻（用于两条之间留间距）
   mainOn: localStorage.getItem("zucai_danmu_main") !== "0",
   booted: false,    // 是否已完成首屏加载
 };
@@ -2180,16 +2181,18 @@ function updateDanmuBadge() {
   b.classList.toggle("hidden", !DANMU.unseen);
 }
 
-/* 顶部弹幕调度：新建议插队立即飘；其余时间循环轮播，一条接一条循环出现 */
+/* 顶部弹幕调度：一条接一条循环，上一条完全滚出后留出空档(间距)再滚下一条 */
 function tickDanmu() {
   if (!DANMU.mainOn || document.hidden) return;
   const tr = $("danmu-track");
   if (!tr) return;
   // 轨道上一次只滚一条：上一条滚完前不挤入下一条
   if (tr.querySelector(".danmu-fly")) return;
+  // 上一条刚滚完：留出 ~2.5s 空档(两条之间保留间距)，不立刻接上
+  if (DANMU.lastFlyEnd && (Date.now() - DANMU.lastFlyEnd) < 2500) return;
   let id = null;
   if (DANMU.newQ.length) {
-    id = DANMU.newQ.shift();   // 新建议：立即插播
+    id = DANMU.newQ.shift();   // 新发言：优先插播
   } else if (DANMU.cycle.length) {
     id = DANMU.cycle[DANMU.cycleIdx % DANMU.cycle.length];
     DANMU.cycleIdx++;
@@ -2225,6 +2228,7 @@ function flyInTrack(it) {
   const finish = () => {
     el.remove();
     DANMU.active = Math.max(0, DANMU.active - 1);
+    DANMU.lastFlyEnd = Date.now();   // 记录滚完时刻：下一条要等间距空档
     // 兜底：万一动画没触发也释放计数
     setTimeout(() => { if (!el.isConnected) DANMU.active = Math.max(0, DANMU.active - 1); }, 200);
   };
