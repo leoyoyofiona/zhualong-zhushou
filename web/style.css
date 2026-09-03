@@ -488,3 +488,47 @@ html[data-theme="dark"] .mover.cold { color: #4ade80; }
   background: rgba(34,197,94,.12); color: var(--accent2); margin-bottom: 6px;
 }
 html[data-theme="dark"] .analyze-hint { color: #93a1bd; }
+
+/* ================ 投注单 = 体彩彩票票面样式（简单清晰） ================ */
+.slip-ticket {
+  background: #fff; border: 1px solid #d5dde8; border-radius: 6px;
+  margin-bottom: 10px; padding: 8px 10px 6px;
+  font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  color: #111827;
+}
+.slip-ticket .tkt-top { display: flex; align-items: center; gap: 8px; border-bottom: 2px solid #111827; padding-bottom: 4px; }
+.slip-ticket .tkt-name { font-weight: 800; font-size: 14px; letter-spacing: .5px; }
+.slip-ticket .tkt-date { font-size: 11px; color: #6b7280; margin-left: auto; }
+.slip-ticket .tkt-del { border: none; background: none; color: #9ca3af; font-size: 14px; cursor: pointer; padding: 0 2px; }
+.slip-ticket .tkt-del:hover { color: #dc2626; }
+.slip-ticket .tkt-meta {
+  display: flex; gap: 14px; font-size: 12px; color: #374151;
+  padding: 5px 0; border-bottom: 1px dashed #d1d9e4;
+}
+.slip-ticket .tkt-meta .tkt-money { margin-left: auto; font-weight: 800; color: #111827; }
+.slip-ticket .tkt-rows { padding: 4px 0; }
+.slip-ticket .tkt-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 3px 0;
+  font-size: 13px; line-height: 1.5; font-variant-numeric: tabular-nums;
+}
+.slip-ticket .tkt-row .c-no { width: 62px; flex-shrink: 0; font-weight: 600; color: #111827; }
+.slip-ticket .tkt-row .c-tm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slip-ticket .tkt-row .c-pk { text-align: right; color: #1d4ed8; font-weight: 600; }
+.slip-ticket .tkt-prize { font-size: 11px; color: #9a3412; border-top: 1px dashed #e5e7eb; padding-top: 4px; }
+.slip-ticket .tkt-foot { padding-top: 4px; text-align: right; }
+.slip-ticket .tkt-edit { border-top: 1px dashed #d1d9e4; padding-top: 6px; margin-top: 4px; }
+.slip-ticket .tkt-edit-row {
+  display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b7280; padding: 2px 0;
+}
+.slip-ticket .tkt-edit-row span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slip-ticket .tkt-edit-row .st { width: 52px; background: #fff; border: 1px solid #d1d9e4; border-radius: 4px; padding: 1px 4px; }
+.slip-ticket .tkt-edit-row .rm { border: none; background: none; color: #dc2626; cursor: pointer; font-size: 12px; }
+html[data-theme="dark"] .slip-ticket { background: #0e1526; border-color: #26334d; color: #e6ecf7; }
+html[data-theme="dark"] .slip-ticket .tkt-name, html[data-theme="dark"] .slip-ticket .c-no,
+html[data-theme="dark"] .slip-ticket .tkt-meta .tkt-money { color: #e6ecf7; }
+html[data-theme="dark"] .slip-ticket .c-pk { color: #93c5fd; }
+html[data-theme="dark"] .slip-ticket .tkt-meta { color: #c3cddd; border-color: #26334d; }
+html[data-theme="dark"] .slip-ticket .tkt-top { border-color: #cbd5e1; }
+html[data-theme="dark"] .slip-ticket .tkt-prize { color: #fbbf24; border-color: #26334d; }
+html[data-theme="dark"] .slip-ticket .tkt-edit-row, html[data-theme="dark"] .slip-ticket .tkt-date { color: #7d8ca8; }
+html[data-theme="dark"] .slip-ticket .tkt-edit-row .st { background: #101a2c; border-color: #26334d; color: #e6ecf7; }

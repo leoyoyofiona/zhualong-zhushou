@@ -177,6 +177,10 @@ function prizeHtml(range) {
 const GAME_SHORT = { had: "胜平负", ttg: "总进球数", crs: "比分", hafu: "半全场" };
 const ZUCAI_SHORT = { zucai14: "胜负彩", ren9: "任选9场", ban6: "6场半全场", goal4: "4场进球" };
 
+function tktRow(no, teams, pick) {
+  return `<div class="tkt-row"><span class="c-no">${esc(no)}</span><span class="c-tm">${esc(teams)}</span><span class="c-pk">${esc(pick)}</span></div>`;
+}
+
 function pickText(pool, option) {
   let p = option;
   if (pool === "hafu") p = String(option).replace(/-/g, "");
@@ -1079,57 +1083,94 @@ function renderSlip() {
     groups.push({ title: `过关 · ${t.M}串1（${t.matches.length}场复式） ${t.notes}注`, pool: "pass", passTicket: { i, ...t } });
   }
 
-  const groupsHtml = groups.length ? groups.map(g => {
-    let rows = "";
-    let prize = null;
-    let title = esc(g.title);
+  const groupsHtml = groups.length ? groups.map((g, gi) => {
+    // 每张"票" = 一种玩法的整组（与体彩出票一致），票面样式简单清晰
+    let rows = "", editBox = "", kind = "items", prize = null, game = "竞彩足球", name, issue = "", serial, notes, stake, dateStr = APP.data.generated_at.slice(5, 10).replace("-", "/");
     if (g.items) {
-      const stake = g.items.reduce((s, x) => s + (Number(x.stake) || 0), 0);
-      title = `${GAME_SHORT[g.pool]} · 过关：单关 倍数：1 · ${g.items.length}注 ${fmt(stake)}元`;
-      rows = g.items.map(it => `<div class="slip-item ticket-row" data-slip="${g.pool}" data-key="${esc(keyOf(it.mid, it.option))}">
-        <span class="t"><b>${esc(it.mid)}</b> ${esc(it.home)} <b style="color:var(--dim)">VS</b> ${esc(it.away)}
-          <small>${GAME_SHORT[g.pool]} ${esc(pickText(g.pool, it.option))}@${fmt(it.odds)}</small></span>
+      kind = "items";
+      name = GAME_SHORT[g.pool];
+      serial = "单关";
+      notes = g.items.length;
+      stake = g.items.reduce((s, x) => s + (Number(x.stake) || 0), 0);
+      rows = g.items.map(it => tktRow(it.mid, `${it.home} VS ${it.away}`, `${GAME_SHORT[g.pool]}  ${pickText(g.pool, it.option)}@${fmt(it.odds)}`)).join("");
+      editBox = g.items.map(it => `<div class="tkt-edit-row">
+        <span>${esc(it.mid)} ${esc(it.home)} VS ${esc(it.away)} ${esc(pickText(g.pool, it.option))}@${fmt(it.odds)}</span>
         <input class="st" type="number" min="2" step="2" value="${it.stake}" data-stake="${g.pool}|${esc(keyOf(it.mid, it.option))}">
-        <button class="rm" data-rm="${g.pool}|${esc(keyOf(it.mid, it.option))}">×</button></div>`).join("");
+        <button class="rm" data-rm="${g.pool}|${esc(keyOf(it.mid, it.option))}">移除</button></div>`).join("");
       prize = jczqPrizeRange(g.pool);
     } else if (g.combos) {
-      const serials = [...new Set(g.combos.map(c => c.serial || 2))].map(s => `${s}×1`).join("/");
-      title = `${GAME_SHORT[g.pool]} · 过关：${serials} 倍数：1 · ${g.combos.length}注 ${fmt(g.combos.reduce((s, c) => s + (Number(c.stake) || 0), 0))}元`;
+      kind = "combos";
+      name = GAME_SHORT[g.pool];
+      serial = [...new Set(g.combos.map(c => c.serial || 2))].map(s => `${s}串1`).join("/");
+      notes = g.combos.length;
+      stake = g.combos.reduce((s, c) => s + (Number(c.stake) || 0), 0);
       const seen = new Set();
       rows = "";
-      for (const c of g.combos) {
-        for (const m of c.matches || []) {
-          const k = m.id + m.option;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          rows += `<div class="slip-item ticket-row"><span class="t"><b>${esc(m.id)}</b> ${esc(m.home)} <b style="color:var(--dim)">VS</b> ${esc(m.away)}
-            <small>${GAME_SHORT[g.pool]} ${esc(pickText(g.pool, m.option))}@${fmt(m.odds)}</small></span></div>`;
-        }
+      for (const c of g.combos) for (const m of c.matches || []) {
+        const k = m.id + m.option;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        rows += tktRow(m.id, `${m.home} VS ${m.away}`, `${GAME_SHORT[g.pool]}  ${pickText(g.pool, m.option)}@${fmt(m.odds)}`);
       }
       prize = combosPrizeRange(g.combos);
     } else if (g.zucai) {
-      const issue = g.zucai.issue;
-      title = `${ZUCAI_SHORT[g.pool]} 第${issue}期 · ${POOL_TITLE[g.pool]} · 过关：复式 倍数：1 · ${g.zucai.notes}注 ${fmt(g.zucai.stake)}元`;
+      kind = "zucai";
+      const zshort = ZUCAI_SHORT[g.pool];
+      name = zshort;
+      issue = g.zucai.issue;
+      game = zshort;
+      serial = "复式";
+      notes = g.zucai.notes;
+      stake = g.zucai.stake;
       const tm = {};
       const it = zucaiIssue(g.pool);
       for (const m of (it ? it.matches : [])) tm[m.num] = m;
       rows = Object.entries(g.zucai.rows || {}).filter(([, r]) => (r.options || []).length).map(([k, r]) => {
         const m = tm[k] || {};
-        const pick = r.options.map(o => g.pool === "ban6" ? pickText("hafu", o) : o).join("/");
-        return `<div class="slip-item ticket-row"><span class="t"><b>第${k}场</b> ${esc(m.home || "")} <b style="color:var(--dim)">VS</b> ${esc(m.away || "")}
-          <small>${esc(pick)}</small></span></div>`;
+        let pick;
+        if (g.pool === "goal4") {
+          const byNum = {};
+          for (const [k2, r2] of Object.entries(g.zucai.rows)) {
+            if (!(r2.options || []).length) continue;
+            const [num, side] = k2.split("-");
+            byNum[num] = byNum[num] || {};
+            byNum[num][side] = r2.options.join("/");
+          }
+          const s = byNum[k];
+          pick = `${s && s["主"] ? "主" + s["主"] : ""} ${s && s["客"] ? "客" + s["客"] : ""}`.trim();
+        } else {
+          pick = r.options.map(o => g.pool === "ban6" ? pickText("hafu", o) : o).join("/");
+        }
+        return tktRow(`第${k}场`, `${m.home || ""} ${m.away ? "VS " + m.away : ""}`.trim(), pick);
       }).join("");
       prize = zucaiPrizeRange(g.pool);
     } else if (g.passTicket) {
+      kind = g.passTicket.live ? "parlay" : "pass";
       const t = g.passTicket;
-      title = `混合过关 · 过关：${t.M}×1 倍数：1 · ${t.notes}注 ${fmt(t.stake)}元`;
-      rows = t.matches.map(e => `<div class="slip-item ticket-row"><span class="t"><b>${esc(e.mid)}</b> ${esc(e.home)} <b style="color:var(--dim)">VS</b> ${esc(e.away)}
-        <small>${esc(e.options.join("/"))}</small></span>
-        <button class="rm" data-rm-pass="${esc(t.i)}">×</button></div>`).join("");
+      name = "混合过关";
+      serial = `${t.M}串1`;
+      notes = t.notes;
+      stake = t.stake;
+      rows = t.matches.map(e => tktRow(e.mid || "", `${e.home} VS ${e.away}`, e.options.join("/"))).join("");
       prize = g.passTicket.prize || null;
     }
-    const prizeLine = prize ? `<div class="slip-prize">💰 预计奖金${prize.fixed ? "" : "（估算）"}：<b>${fmtMoney(prize.min)} ~ ${fmtMoney(prize.max)} 元</b></div>` : "";
-    return `<div class="slip-group"><div class="slip-group-title">${title}</div>${rows}${prizeLine}</div>`;
+    const head = kind === "zucai" ? `${game} 第${issue}期` : `${game} · ${name}`;
+    const dateTag = kind === "zucai" ? issue : dateStr;
+    const prizeLine = prize ? `<div class="tkt-prize">预计奖金：${fmtMoney(prize.min)} ~ ${fmtMoney(prize.max)} 元${prize.fixed ? "" : "（估算）"}</div>` : "";
+    return `<div class="slip-ticket">
+      <div class="tkt-top">
+        <span class="tkt-name">${esc(head)}</span>
+        <span class="tkt-date">${esc(dateTag)}</span>
+        <button class="tkt-del" data-rm-ticket="${kind}|${kind === "pass" ? g.passTicket.i : (g.pool || "")}" title="移除这张票">✕</button>
+      </div>
+      <div class="tkt-meta"><span>过关：${esc(serial)}</span><span>倍数：1</span><span>注数：${notes}</span><span class="tkt-money">金额：${fmt(stake)}元</span></div>
+      <div class="tkt-rows">${rows}</div>
+      ${prizeLine}
+      <div class="tkt-foot">
+        <button class="btn small" data-edit-ticket="${gi}">✏️ 编辑金额</button>
+      </div>
+      <div class="tkt-edit hidden">${editBox}</div>
+    </div>`;
   }).join("") : `<div class="slip-empty">还没有选择任何投注。<br>点卡片上的赔率按钮，或点"一键推荐"。</div>`;
 
   body.innerHTML = groupsHtml + passGeneratorHtml();
@@ -1861,6 +1902,23 @@ function bindEvents() {
 
   $("slip-body").addEventListener("click", (e) => {
     const t = e.target;
+    if (t.dataset.rmTicket !== undefined) {
+      const [kind, key] = t.dataset.rmTicket.split("|");
+      if (kind === "items" || kind === "parlay") { APP.sel[key] = new Map(); APP.combos[key] = []; }
+      else if (kind === "combos") { APP.combos[key] = []; }
+      else if (kind === "zucai") { delete APP.zsel[key]; }
+      else if (kind === "pass") { APP.passTickets.splice(Number(key), 1); }
+      renderCards();
+      renderSlip();
+      toast("已移除该票");
+      return;
+    }
+    if (t.dataset.editTicket !== undefined) {
+      const card = t.closest(".slip-ticket");
+      const box = card && card.querySelector(".tkt-edit");
+      if (box) box.classList.toggle("hidden");
+      return;
+    }
     if (t.id === "btn-pass-add") {
       const { checked, notes, stake, M, tooMany } = passCompute();
       if (!notes || notes < 0) { toast(tooMany ? "注数超限，请减少场次" : "没有可生成的过关票"); return; }
