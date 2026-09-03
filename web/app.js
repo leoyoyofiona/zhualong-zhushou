@@ -2184,19 +2184,49 @@ function updateDanmuBadge() {
 }
 
 /* 弹幕调度：所有弹幕按固定间隔一条接一条上场，不等待上一条滚完。
-   所有弹幕同速(60px/s)同线滚动 → 入场间隔恒定，前后条保持固定间距、互不追尾。 */
+   同一条弹幕(同一人同一内容)不会重复上场：上场前检查轨道上是否已有该条在滚。 */
 function tickDanmu() {
   if (!DANMU.mainOn || document.hidden) return;
   const tr = $("danmu-track");
   if (!tr) return;
-  // 同屏上限：防弹幕过多挤在一起(入场间隔4.2s × 单条滚动时长决定自然同屏数)
+  // 同屏上限：防弹幕过多挤在一起
   if (DANMU.active >= 8) return;
+  // 正在滚动的弹幕"人+内容"键，同一条只允许同时出现一次
+  const flying = new Set();
+  tr.querySelectorAll(".danmu-fly").forEach(f => {
+    const k = f.dataset && f.dataset.contentKey;
+    if (k) flying.add(k);
+  });
+  // 从 newQ 或轮播队列里取一条"当前没在滚"的
+  const pickOne = (arr) => {
+    const n = arr.length;
+    for (let i = 0; i < n; i++) {
+      const id = arr[i];
+      const it = DANMU.items.find(x => x.id === id);
+      if (!it) { arr.splice(i, 1); i--; n = arr.length; continue; }
+      const k = String(it.nick || "") + "\u0001" + String(it.text || "");
+      if (!flying.has(k)) return id;
+    }
+    return null;
+  };
   let id = null;
   if (DANMU.newQ.length) {
-    id = DANMU.newQ.shift();   // 新发言：优先上场
-  } else if (DANMU.cycle.length) {
-    id = DANMU.cycle[DANMU.cycleIdx % DANMU.cycle.length];
-    DANMU.cycleIdx++;
+    // 新发言：若同内容已在滚则等它滚完，避免同一句同时出现两条
+    id = pickOne(DANMU.newQ);
+    if (id) {
+      const i = DANMU.newQ.indexOf(id);
+      DANMU.newQ.splice(i, 1);
+    }
+  }
+  if (!id && DANMU.cycle.length) {
+    const n = DANMU.cycle.length;
+    for (let i = 0; i < n; i++) {
+      const cid = DANMU.cycle[(DANMU.cycleIdx + i) % n];
+      const it = DANMU.items.find(x => x.id === cid);
+      if (!it) continue;
+      const k = String(it.nick || "") + "\u0001" + String(it.text || "");
+      if (!flying.has(k)) { id = cid; DANMU.cycleIdx = (DANMU.cycleIdx + i + 1) % n; break; }
+    }
   }
   if (!id) return;
   const it = DANMU.items.find(x => x.id === id);
@@ -2211,6 +2241,7 @@ function flyInTrack(it) {
   const el = document.createElement("div");
   el.className = "danmu-fly";
   el.dataset.mid = it.id;
+  el.dataset.contentKey = String(it.nick || "") + "\u0001" + String(it.text || "");
   const color = FLY_COLORS[(it.nick || "").length % FLY_COLORS.length];
   const liked = DANMU.liked.has(it.id);
   const n = Number(it.likes) || 0;
