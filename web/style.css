@@ -559,43 +559,52 @@ html[data-theme="dark"] .tag-invest { background: #22c55e; color: #052e16; }
   50% { box-shadow: 0 0 0 4px rgba(34,197,94,.18); }
 }
 
-/* ================ 建议弹幕（公开透明 · 弹幕飘屏 + 可回看列表） ================ */
-.danmu-wrap { position: fixed; right: 14px; bottom: 14px; z-index: 300; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
-.danmu-ticker {
-  display: flex; align-items: center; gap: 8px; max-width: min(420px, calc(100vw - 28px));
-  background: rgba(30, 41, 59, .92); color: #fff; border-radius: 999px;
-  padding: 7px 14px; font-size: 12.5px; cursor: pointer;
-  box-shadow: 0 8px 24px rgba(15, 23, 42, .35); backdrop-filter: blur(6px);
-  transition: transform .15s; border: 1px solid rgba(148,163,184,.25);
-}
-.danmu-ticker:hover { transform: translateY(-2px); }
-.danmu-ticker.danmu-hidden { display: none; }
-.danmu-live { color: #f87171; font-size: 10px; font-weight: 800; letter-spacing: .5px; animation: livePulse 1.4s infinite; }
-.danmu-ticker-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.danmu-expand { color: #93c5fd; font-weight: 800; flex: none; }
-@keyframes livePulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
-.danmu-flash { outline: 2px solid rgba(59,130,246,.8); }
+/* ================ 建议弹幕：主页直接飘屏（公开透明 · 弹幕 + 可回看列表） ================ */
 
+/* 主页弹幕层：铺在整个主页面内容之上，不挡任何点击 */
+.danmu-overlay {
+  position: fixed; inset: 0; z-index: 200; pointer-events: none; overflow: hidden;
+}
+.danmu-fly {
+  position: absolute; left: 0; white-space: nowrap; color: #fff;
+  border-radius: 999px; padding: 4px 16px; line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(15,23,42,.28); will-change: transform;
+  font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.25); pointer-events: none;
+}
+.danmu-fly .df-nick { color: #fde68a; font-weight: 800; margin-right: 2px; }
+
+/* 右下角悬浮入口按钮 */
+.danmu-wrap { position: fixed; right: 16px; bottom: 16px; z-index: 400; }
+.danmu-fab {
+  width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+  background: linear-gradient(135deg, #2563eb, #7c3aed); color: #fff;
+  font-size: 21px; box-shadow: 0 10px 26px rgba(37,99,235,.42);
+  position: relative; transition: transform .15s;
+}
+.danmu-fab:hover { transform: translateY(-2px) scale(1.05); }
+.danmu-fab .danmu-badge {
+  position: absolute; top: -4px; right: -4px; min-width: 18px; height: 18px;
+  border-radius: 999px; background: #dc2626; color: #fff; font-size: 11px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; padding: 0 4px;
+  box-shadow: 0 0 0 2px #fff;
+}
+html[data-theme="dark"] .danmu-fab .danmu-badge { box-shadow: 0 0 0 2px #0f172a; }
+
+/* 弹幕面板（右下角弹出） */
 .danmu-panel {
-  width: min(400px, calc(100vw - 24px)); max-height: min(78vh, 620px);
+  position: absolute; right: 0; bottom: 62px; width: min(400px, calc(100vw - 24px));
+  max-height: min(76vh, 640px);
   display: flex; flex-direction: column; border-radius: 16px; overflow: hidden;
   background: rgba(255,255,255,.97); border: 1px solid var(--line);
   box-shadow: 0 24px 70px rgba(15,23,42,.35); backdrop-filter: blur(10px);
 }
 html[data-theme="dark"] .danmu-panel { background: rgba(15,23,42,.96); border-color: #26334d; }
-.danmu-head { display: flex; align-items: baseline; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.danmu-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 .danmu-head b { font-size: 14px; }
-.danmu-sub { flex: 1; font-size: 10.5px; color: var(--dim); }
-.danmu-stage { height: 52px; position: relative; overflow: hidden; background: rgba(15,23,42,.06); border-bottom: 1px dashed var(--line); }
-html[data-theme="dark"] .danmu-stage { background: rgba(148,163,184,.08); }
-.danmu-fly {
-  position: absolute; top: 12px; left: 0; white-space: nowrap;
-  font-size: 13px; color: #fff; background: rgba(37,99,235,.92); border-radius: 999px;
-  padding: 3px 14px; box-shadow: 0 4px 14px rgba(15,23,42,.3); will-change: transform;
-}
-.danmu-fly b { color: #fde68a; }
-.danmu-hint { padding: 7px 14px 0; font-size: 10.5px; color: var(--dim); }
-.danmu-list { flex: 1; overflow-y: auto; padding: 8px 14px; min-height: 120px; display: flex; flex-direction: column; gap: 8px; }
+.danmu-sub { flex: 1; font-size: 10.5px; color: var(--dim); min-width: 120px; }
+.danmu-main-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--dim); cursor: pointer; }
+.danmu-hint { padding: 8px 14px 0; font-size: 10.5px; color: var(--dim); }
+.danmu-list { flex: 1; overflow-y: auto; padding: 8px 14px; min-height: 130px; display: flex; flex-direction: column; gap: 8px; }
 .danmu-item { border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; background: var(--card2); }
 html[data-theme="dark"] .danmu-item { background: rgba(30,41,59,.6); }
 .danmu-meta { display: flex; justify-content: space-between; align-items: baseline; font-size: 11px; color: var(--dim); }
@@ -611,7 +620,7 @@ html[data-theme="dark"] .danmu-item { background: rgba(30,41,59,.6); }
 .dbtn:disabled { opacity: .5; cursor: default; }
 .dbtn.danger:hover { border-color: var(--danger); color: var(--danger); }
 html[data-theme="dark"] .dbtn { background: rgba(30,41,59,.7); }
-.danmu-form { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px 12px; border-top: 1px solid var(--line); }
+.danmu-form { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 12px; border-top: 1px solid var(--line); }
 .danmu-form input, .danmu-form textarea {
   border: 1px solid var(--line); border-radius: 8px; padding: 6px 9px; font: inherit;
   background: #fff; color: var(--text); resize: none; outline: none; width: 100%;

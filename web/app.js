@@ -1875,7 +1875,7 @@ function bindEvents() {
   $("btn-danmu-close").onclick = danmuCollapse;
   $("btn-danmu-send").onclick = danmuSend;
   $("btn-sug-admin").onclick = sugAdminSave;
-  $("danmu-ticker").onclick = danmuExpand;
+  $("danmu-fab").onclick = danmuToggle;
   $("btn-theme").onclick = cycleTheme;
   $("btn-save-settings").onclick = saveSettings;
   $("btn-llm-test").onclick = llmTest;
@@ -2052,17 +2052,31 @@ function bindEvents() {
   initDanmu();
 }
 
-/* ---------------- 建议弹幕（公开透明 · 腾讯云 COS 存储） ---------------- */
+/* ---------------- 建议弹幕（主页直接飘屏 · 公开透明 · COS 存储） ---------------- */
 
 const DANMU = {
   items: [],        // 全部可见建议（旧→新）
-  seen: new Set(),  // 已飘屏展示过的 id
+  seen: new Set(),  // 已见过的 id
   liked: new Set(), // 本浏览器点过赞的 id
   reported: new Set(),
   open: false,      // 面板是否展开
-  queue: [],        // 待飘屏的新建议
-  lastListText: "", // 上次列表渲染指纹（避免整表重建）
+  newQ: [],         // 新建议队列（优先飘）
+  rotate: [],       // 循环轮播队列（最近建议，主页保持弹幕氛围）
+  lastListText: "", // 列表渲染指纹
+  unseen: 0,        // 新建议角标计数
+  active: 0,        // 当前主页正在飘的条数
+  mainOn: localStorage.getItem("zucai_danmu_main") !== "0",
+  initialSeed: false,
 };
+const DANMU_MAX_FLY = 3;    // 主页同屏最多飘条数
+const DANMU_ROTATE_N = 8;   // 轮播最近 N 条
+const FLY_COLORS = ["#2563eb", "#0ea5e9", "#7c3aed", "#0d9488", "#db2777", "#ea580c"];
+
+function danmuMainOn(on) {
+  DANMU.mainOn = on;
+  localStorage.setItem("zucai_danmu_main", on ? "1" : "0");
+  $("danmu-overlay").style.display = on ? "" : "none";
+}
 
 function danmuToggle() {
   if (DANMU.open) danmuCollapse(); else danmuExpand();
@@ -2070,9 +2084,9 @@ function danmuToggle() {
 
 function danmuExpand() {
   DANMU.open = true;
-  $("danmu-wrap").classList.remove("hidden");
   $("danmu-panel").classList.remove("hidden");
-  $("danmu-ticker").classList.add("danmu-hidden");
+  DANMU.unseen = 0;
+  updateDanmuBadge();
   refreshSuggestions(true);
   const n = $("danmu-nick");
   if (n && !n.value) n.value = localStorage.getItem("zucai_danmu_nick") || "";
@@ -2082,18 +2096,28 @@ function danmuExpand() {
 function danmuCollapse() {
   DANMU.open = false;
   $("danmu-panel").classList.add("hidden");
-  $("danmu-ticker").classList.remove("danmu-hidden");
 }
 
 function initDanmu() {
   try { DANMU.liked = new Set(JSON.parse(localStorage.getItem("zucai_danmu_liked") || "[]")); } catch (e) {}
   try { DANMU.reported = new Set(JSON.parse(localStorage.getItem("zucai_danmu_reported") || "[]")); } catch (e) {}
-  // 常驻右下角弹幕条（可点开完整面板）
-  $("danmu-wrap").classList.remove("hidden");
-  // 首次静默拉取一次（不打扰，仅探活；配置好 COS 前 ticker 显示提示）
-  refreshSuggestions(false).catch(() => {});
-  setInterval(() => { if (!DANMU.open) refreshSuggestions(false).catch(() => {}); }, 30000);
-  setInterval(pumpDanmuQueue, 6000);
+  const chk = $("danmu-main");
+  if (chk) {
+    chk.checked = DANMU.mainOn;
+    chk.addEventListener("change", e => danmuMainOn(e.target.checked));
+  }
+  danmuMainOn(DANMU.mainOn);
+  // 首次拉取，把已有建议排进主页轮播（让弹幕直接出现在主页面）
+  refreshSuggestions(false).catch(() => {}).then(() => seedDanmuRotate());
+  setInterval(() => refreshSuggestions(false).catch(() => {}), 30000);
+  setInterval(tickDanmu, 3500);
+}
+
+function seedDanmuRotate() {
+  if (DANMU.initialSeed || !DANMU.items.length) return;
+  DANMU.initialSeed = true;
+  // 最近 N 条（旧→新）入轮播
+  DANMU.rotate = DANMU.items.slice(-DANMU_ROTATE_N).map(x => x.id);
 }
 
 async function refreshSuggestions(showError) {
@@ -2103,60 +2127,75 @@ async function refreshSuggestions(showError) {
       const box = $("danmu-list");
       if (box) box.innerHTML = `<div class="slip-empty">${esc(r.error || "读取失败")}</div>`;
     }
-    tickerText(`💬 ${esc((r.error || "").slice(0, 46)) || "建议服务暂不可用，稍后再试"}`);
     return;
   }
   const items = r.items || [];
-  const ids = items.map(x => x.id);
   const fresh = items.filter(x => !DANMU.seen.has(x.id));
-  DANMU.seen = new Set(ids);
+  DANMU.seen = new Set(items.map(x => x.id));
   DANMU.items = items;
-  // 待飘队列：倒序（新的先进面板/先飘）
-  DANMU.queue = DANMU.queue.concat(fresh.reverse()).slice(-30);
-  if (DANMU.open) renderDanmuList(items);
-  else if (items.length) tickerText(lastTicker(items));
-  else tickerText("💬 还没有建议，点这里写下第一条吧！");
-}
-
-function lastTicker(items) {
-  const last = items[items.length - 1];
-  return `💬 ${esc(last.nick)}：${esc(last.text.length > 40 ? last.text.slice(0, 40) + "…" : last.text)}`;
-}
-
-function tickerText(html) {
-  const el = $("danmu-ticker-text");
-  if (el && el.innerHTML !== html) el.innerHTML = html;
-}
-
-function pumpDanmuQueue() {
-  if (DANMU.open && DANMU.queue.length) {
-    const it = DANMU.queue.shift();
-    flyInStage(`<b>${esc(it.nick)}</b>：${esc(it.text)}`);
-  } else if (!DANMU.open && DANMU.queue.length && $("danmu-ticker")) {
-    const it = DANMU.queue.shift();
-    tickerText(`💬 ${esc(it.nick)}：${esc(it.text)}`);
-    // 用背景动画闪烁一下提示"新建议来了"
-    $("danmu-ticker").classList.add("danmu-flash");
-    setTimeout(() => $("danmu-ticker").classList.remove("danmu-flash"), 2200);
+  if (fresh.length) {
+    for (const it of fresh) DANMU.newQ.push(it.id);
+    if (!DANMU.open) { DANMU.unseen += fresh.length; updateDanmuBadge(); }
   }
+  if (DANMU.open) renderDanmuList(items);
 }
 
-function flyInStage(html) {
-  const stage = $("danmu-stage");
-  if (!stage) return;
+function updateDanmuBadge() {
+  const b = $("danmu-badge");
+  if (!b) return;
+  b.textContent = DANMU.unseen || "";
+  b.classList.toggle("hidden", !DANMU.unseen);
+}
+
+/* 主页弹幕调度：优先飘新建议；空闲时轮播最近建议，保持页面有弹幕氛围 */
+function tickDanmu() {
+  if (!DANMU.mainOn || document.hidden) return;
+  if (DANMU.active >= DANMU_MAX_FLY) return;
+  const ov = $("danmu-overlay");
+  if (!ov) return;
+  let id = null;
+  if (DANMU.newQ.length) id = DANMU.newQ.shift();
+  else if (DANMU.rotate.length) {
+    id = DANMU.rotate.shift();
+    DANMU.rotate.push(id); // 循环轮播
+  }
+  if (!id) return;
+  const it = DANMU.items.find(x => x.id === id);
+  if (it) flyOnPage(it);
+}
+
+function flyOnPage(it) {
+  const ov = $("danmu-overlay");
+  if (!ov) return;
   const el = document.createElement("div");
   el.className = "danmu-fly";
-  el.innerHTML = html;
-  stage.appendChild(el);
-  const W = stage.clientWidth || 500;
-  const tw = el.scrollWidth || 200;
-  el.style.left = "0px";
-  // 用 WAAPI 从右侧外飘到左侧外，完成即移除
-  const anim = el.animate(
-    [{ transform: `translateX(${W}px)` }, { transform: `translateX(-${tw}px)` }],
-    { duration: 9000, easing: "linear" }
-  );
-  anim.onfinish = () => el.remove();
+  const color = FLY_COLORS[(it.nick || "").length % FLY_COLORS.length];
+  el.innerHTML = `<span class="df-nick">${esc(it.nick)}</span> ${esc(it.text)}`;
+  el.style.background = color;
+  ov.appendChild(el);
+  const vw = window.innerWidth || document.documentElement.clientWidth || 1200;
+  const tw = el.scrollWidth || 260;
+  el.style.top = (8 + Math.random() * 62) + "vh";   // 避开底部按钮/顶栏区域，飘在主内容上
+  el.style.fontSize = 13 + Math.floor(Math.random() * 3) + "px";
+  el.style.opacity = 0.85 + Math.random() * 0.15;
+  DANMU.active++;
+  const dur = 10000 + Math.floor(Math.random() * 5000);
+  const startX = vw + 40, endX = -(tw + 60);
+  if (typeof el.animate === "function") {
+    const anim = el.animate(
+      [{ transform: `translateX(${startX}px)` }, { transform: `translateX(${endX}px)` }],
+      { duration: dur, easing: "linear" }
+    );
+    anim.onfinish = () => { el.remove(); DANMU.active = Math.max(0, DANMU.active - 1); };
+  } else {
+    // 回退：CSS transition（jsdom 等无 WAAPI 环境不报错，也不抛异常）
+    el.style.transition = `transform ${dur}ms linear`;
+    el.style.transform = `translateX(${startX}px)`;
+    setTimeout(() => { el.style.transform = `translateX(${endX}px)`; }, 20);
+    setTimeout(() => { el.remove(); DANMU.active = Math.max(0, DANMU.active - 1); }, dur + 300);
+  }
+  // 兜底：万一动画未触发也释放计数
+  setTimeout(() => { if (!el.isConnected) DANMU.active = Math.max(0, DANMU.active - 1); }, dur + 500);
 }
 
 function timeFmt(t) {
