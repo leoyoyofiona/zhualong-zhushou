@@ -2060,16 +2060,18 @@ const DANMU = {
   liked: new Set(), // 本浏览器点过赞的 id
   reported: new Set(),
   open: false,      // 面板是否展开
-  newQ: [],         // 新建议队列（优先飘）
-  rotate: [],       // 循环轮播队列（最近建议，主页保持弹幕氛围）
+  newQ: [],         // 新建议队列（到达时立即优先飘）
+  cycle: [],        // 循环轮播队列（最近建议反复飘，主页一直有弹幕）
+  cycleIdx: 0,      // 循环播放游标
+  lastRot: 0,       // 上次循环轮播时间（控制节奏，避免刷屏）
   lastListText: "", // 列表渲染指纹
   unseen: 0,        // 新建议角标计数
   active: 0,        // 当前主页正在飘的条数
   mainOn: localStorage.getItem("zucai_danmu_main") !== "0",
-  initialSeed: false,
+  booted: false,    // 是否已完成首屏加载
 };
-const DANMU_MAX_FLY = 3;    // 主页同屏最多飘条数
-const DANMU_ROTATE_N = 8;   // 轮播最近 N 条
+const DANMU_MAX_FLY = 4;    // 主页同屏最多飘条数
+const DANMU_ROTATE_N = 10;  // 循环轮播最近 N 条
 const FLY_COLORS = ["#2563eb", "#0ea5e9", "#7c3aed", "#0d9488", "#db2777", "#ea580c"];
 
 function danmuMainOn(on) {
@@ -2107,17 +2109,27 @@ function initDanmu() {
     chk.addEventListener("change", e => danmuMainOn(e.target.checked));
   }
   danmuMainOn(DANMU.mainOn);
-  // 首次拉取，把已有建议排进主页轮播（让弹幕直接出现在主页面）
-  refreshSuggestions(false).catch(() => {}).then(() => seedDanmuRotate());
+  // 首屏立即拉一次（之后每 30s 轮询），把已有建议加入主页循环轮播
+  refreshSuggestions(false).catch(() => {}).then(() => rebuildDanmuCycle());
   setInterval(() => refreshSuggestions(false).catch(() => {}), 30000);
-  setInterval(tickDanmu, 3500);
+  // 循环节奏：每 3s 试着飘一条（受同屏上限限制），保证主页弹幕持续循环出现
+  setInterval(tickDanmu, 3000);
 }
 
-function seedDanmuRotate() {
-  if (DANMU.initialSeed || !DANMU.items.length) return;
-  DANMU.initialSeed = true;
-  // 最近 N 条（旧→新）入轮播
-  DANMU.rotate = DANMU.items.slice(-DANMU_ROTATE_N).map(x => x.id);
+/* 把最近的建议整理成循环轮播队列（旧→新）。有新建议时重建，旧的保留继续循环。 */
+function rebuildDanmuCycle() {
+  if (!DANMU.items.length) return;
+  const keep = new Set(DANMU.items.map(x => x.id));
+  // 保留还在队列中、未被删的建议
+  DANMU.cycle = DANMU.cycle.filter(id => keep.has(id));
+  // 把最新建议补进队尾（去重）
+  for (const it of DANMU.items.slice(-DANMU_ROTATE_N)) {
+    if (!DANMU.cycle.includes(it.id)) DANMU.cycle.push(it.id);
+  }
+  // 队列只保留最近 N 条，保证循环长度合理
+  if (DANMU.cycle.length > DANMU_ROTATE_N) {
+    DANMU.cycle = DANMU.cycle.slice(-DANMU_ROTATE_N);
+  }
 }
 
 async function refreshSuggestions(showError) {
@@ -2130,12 +2142,17 @@ async function refreshSuggestions(showError) {
     return;
   }
   const items = r.items || [];
+  const isFirst = !DANMU.booted;   // 首次加载：全部进循环轮播，不当作"新消息"轰炸
   const fresh = items.filter(x => !DANMU.seen.has(x.id));
   DANMU.seen = new Set(items.map(x => x.id));
   DANMU.items = items;
+  DANMU.booted = true;
   if (fresh.length) {
-    for (const it of fresh) DANMU.newQ.push(it.id);
-    if (!DANMU.open) { DANMU.unseen += fresh.length; updateDanmuBadge(); }
+    if (!isFirst) {
+      for (const it of fresh) DANMU.newQ.push(it.id);
+      if (!DANMU.open) { DANMU.unseen += fresh.length; updateDanmuBadge(); }
+    }
+    rebuildDanmuCycle(); // 有新建议时把最新建议纳入循环
   }
   if (DANMU.open) renderDanmuList(items);
 }
@@ -2147,17 +2164,24 @@ function updateDanmuBadge() {
   b.classList.toggle("hidden", !DANMU.unseen);
 }
 
-/* 主页弹幕调度：优先飘新建议；空闲时轮播最近建议，保持页面有弹幕氛围 */
+/* 主页弹幕调度：新建议插队立即飘；其余时间循环轮播，主页始终有弹幕飘过 */
 function tickDanmu() {
   if (!DANMU.mainOn || document.hidden) return;
   if (DANMU.active >= DANMU_MAX_FLY) return;
   const ov = $("danmu-overlay");
   if (!ov) return;
   let id = null;
-  if (DANMU.newQ.length) id = DANMU.newQ.shift();
-  else if (DANMU.rotate.length) {
-    id = DANMU.rotate.shift();
-    DANMU.rotate.push(id); // 循环轮播
+  if (DANMU.newQ.length) {
+    // 新建议：立即插播，不受节奏限制
+    id = DANMU.newQ.shift();
+  } else if (DANMU.cycle.length) {
+    // 循环轮播节奏：条数越多每条间隔越长（如 8 条约每 6 秒重飘一轮中一条）
+    const perGap = 2600 + DANMU.cycle.length * 220;
+    if (Date.now() - DANMU.lastRot >= perGap) {
+      id = DANMU.cycle[DANMU.cycleIdx % DANMU.cycle.length];
+      DANMU.cycleIdx++;
+      DANMU.lastRot = Date.now();
+    }
   }
   if (!id) return;
   const it = DANMU.items.find(x => x.id === id);
