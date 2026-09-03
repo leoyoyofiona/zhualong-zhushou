@@ -634,3 +634,13 @@ html[data-theme="dark"] .dbtn { background: rgba(30,41,59,.7); }
 html[data-theme="dark"] .danmu-form input, html[data-theme="dark"] .danmu-form textarea { background: rgba(30,41,59,.7); color: #e6ecf7; }
 .danmu-form .btn { align-self: flex-end; }
 #btn-danmu { border-radius: 8px; }
+
+/* 弹幕管理模式 */
+.danmu-adminbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 7px 14px; background: rgba(220,38,38,.07); border-bottom: 1px dashed var(--line); }
+.danmu-adminbar .admin-tag { font-size: 11px; font-weight: 800; color: var(--danger); }
+.danmu-adminbar .admin-tip { flex: 1; font-size: 10.5px; color: var(--dim); min-width: 140px; }
+.btn.danger { color: var(--danger); border-color: rgba(220,38,38,.5); }
+.btn.danger:hover { background: var(--danger); color: #fff; }
+.danmu-hidden-tag { font-size: 10.5px; color: var(--danger); background: rgba(220,38,38,.08); border-radius: 6px; padding: 1px 8px; margin: 2px 0 4px; }
+.dbtn.restore { color: #15803d; border-color: #86efac; }
+.dbtn.restore:hover { background: #dcfce7; color: #15803d; }

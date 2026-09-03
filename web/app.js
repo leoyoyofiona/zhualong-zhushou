@@ -1875,6 +1875,9 @@ function bindEvents() {
   $("btn-danmu-close").onclick = danmuCollapse;
   $("btn-danmu-send").onclick = danmuSend;
   $("btn-sug-admin").onclick = sugAdminSave;
+  $("btn-danmu-admin").onclick = danmuAdminLogin;
+  $("btn-danmu-admin-exit").onclick = danmuAdminExit;
+  $("btn-danmu-clear").onclick = danmuAdminClear;
   $("danmu-fab").onclick = danmuToggle;
   $("btn-theme").onclick = cycleTheme;
   $("btn-save-settings").onclick = saveSettings;
@@ -2060,6 +2063,7 @@ const DANMU = {
   liked: new Set(), // 本浏览器点过赞的 id
   reported: new Set(),
   open: false,      // 面板是否展开
+  admin: null,      // 管理口令（登录后存内存，刷新失效）；非空=管理模式
   newQ: [],         // 新建议队列（到达时立即优先飘）
   cycle: [],        // 循环轮播队列（最近建议反复飘，主页一直有弹幕）
   cycleIdx: 0,      // 循环播放游标
@@ -2131,19 +2135,33 @@ function rebuildDanmuCycle() {
 }
 
 async function refreshSuggestions(showError) {
-  const r = await api("/api/suggestions");
+  // 管理模式：从 /login 拉全量(含被举报隐藏的)；游客：公开列表
+  const isAdminMode = !!DANMU.admin;
+  const r = isAdminMode
+    ? await api("/api/suggestions/login", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ admin: DANMU.admin }) })
+    : await api("/api/suggestions");
   if (!r.ok) {
     if (showError && DANMU.open) {
       const box = $("danmu-list");
       if (box) box.innerHTML = `<div class="slip-empty">${esc(r.error || "读取失败")}</div>`;
     }
+    if (isAdminMode && showError) { /* 口令失效则自动退出管理模式 */
+      danmuAdminExit();
+    }
     return;
   }
-  const items = r.items || [];
+  const raw = r.items || [];
+  if (isAdminMode) {
+    DANMU.adminList = raw;                                   // 管理视图：全量
+    DANMU.items = raw.filter(x => !x.hidden);                // 公开部分供轨道循环
+  } else {
+    DANMU.items = raw;
+  }
+  const items = DANMU.items;
   const isFirst = !DANMU.booted;   // 首次加载：全部进循环轮播，不当作"新消息"轰炸
   const fresh = items.filter(x => !DANMU.seen.has(x.id));
   DANMU.seen = new Set(items.map(x => x.id));
-  DANMU.items = items;
   DANMU.booted = true;
   if (fresh.length) {
     if (!isFirst) {
@@ -2152,7 +2170,7 @@ async function refreshSuggestions(showError) {
     }
     rebuildDanmuCycle(); // 有新建议时把最新建议纳入循环
   }
-  if (DANMU.open) renderDanmuList(items);
+  if (DANMU.open) renderDanmuList(isAdminMode ? DANMU.adminList : DANMU.items, isAdminMode);
 }
 
 function updateDanmuBadge() {
@@ -2225,23 +2243,33 @@ function timeFmt(t) {
   return `${d.getMonth() + 1}-${d.getDate()} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-function renderDanmuList(items) {
+function renderDanmuList(items, isAdmin) {
   const box = $("danmu-list");
   if (!box) return;
-  if (!items.length) { box.innerHTML = `<div class="slip-empty">还没有建议。写下第一条吧（所有人公开可见）👇</div>`; return; }
-  const fp = items.map(x => `${x.id}|${x.likes}|${x.hidden}`).join(",");
+  if (!items || !items.length) {
+    box.innerHTML = isAdmin
+      ? `<div class="slip-empty">当前没有任何建议（含被举报隐藏的）。</div>`
+      : `<div class="slip-empty">还没有建议。写下第一条吧（所有人公开可见）👇</div>`;
+    return;
+  }
+  const fp = (isAdmin ? "A|" : "P|") + items.map(x => `${x.id}|${x.likes}|${x.hidden}|${x.reports || 0}`).join(",");
   if (fp === DANMU.lastListText) return;
   DANMU.lastListText = fp;
   const rows = [...items].reverse().map(it => {
     const liked = DANMU.liked.has(it.id);
     const reported = DANMU.reported.has(it.id);
+    const flag = it.hidden ? `<div class="danmu-hidden-tag">⚠️ 被举报自动隐藏（${it.reports || 1}人）· 仅管理可见</div>` : "";
+    const adminBtns = isAdmin ? (it.hidden
+      ? `<button class="dbtn restore" data-restore="${esc(it.id)}" title="恢复为公开可见">↺ 恢复</button>`
+      : `<button class="dbtn danger" data-del="${esc(it.id)}" title="删除这条建议">🗑 删除</button>`) : "";
     return `<div class="danmu-item">
       <div class="danmu-meta"><b>${esc(it.nick)}</b><span>${timeFmt(it.t)}</span></div>
+      ${flag}
       <div class="danmu-text">${esc(it.text)}</div>
       <div class="danmu-acts">
         <button class="dbtn ${liked ? "on" : ""}" data-like="${esc(it.id)}" ${liked ? "disabled" : ""}>👍 ${it.likes || 0}</button>
         <button class="dbtn" data-report="${esc(it.id)}" ${reported ? "disabled" : ""}>${reported ? "已举报" : "⛔ 举报"}</button>
-        <button class="dbtn danger" data-del="${esc(it.id)}" title="管理口令删除">🗑 删除</button>
+        ${adminBtns}
       </div>
     </div>`;
   }).join("");
@@ -2249,6 +2277,67 @@ function renderDanmuList(items) {
 }
 
 function toastD(msg) { toast(msg); }
+
+/* ---------------- 管理入口（站密码） ---------------- */
+
+function danmuAdminLogin() {
+  if (DANMU.admin) { toast("已在管理模式中"); return; }
+  const code = prompt("输入站密码进入管理：可删除某条 / 恢复被举报隐藏的 / 一键清空全部。");
+  if (!code) return;
+  api("/api/suggestions/login", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ admin: code }) }).then(r => {
+    if (!r.ok) { toast(r.error || "站密码不正确"); return; }
+    DANMU.admin = code;
+    DANMU.adminList = r.items || [];
+    $("danmu-adminbar").classList.remove("hidden");
+    $("btn-danmu-admin").textContent = "👑 管理中";
+    renderDanmuList(DANMU.adminList, true);
+    toast("已进入管理模式：删除/恢复/清空可用");
+  }).catch(e => toast("登录失败：" + e.message));
+}
+
+function danmuAdminExit() {
+  DANMU.admin = null;
+  DANMU.adminList = null;
+  $("danmu-adminbar").classList.add("hidden");
+  $("btn-danmu-admin").textContent = "🔐 管理";
+  DANMU.lastListText = "";
+  refreshSuggestions(true);
+  toast("已退出管理模式");
+}
+
+function danmuAdminClear() {
+  if (!DANMU.admin) { toast("请先进入管理模式"); return; }
+  const n = DANMU.adminList ? DANMU.adminList.length : 0;
+  if (!confirm(`确定清空全部 ${n} 条建议吗？此操作不可恢复！`)) return;
+  api("/api/suggestions/clear", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ admin: DANMU.admin }) }).then(r => {
+    if (!r.ok) { toast(r.error || "清空失败"); return; }
+    toast("已清空全部建议");
+    refreshSuggestions(true);
+  }).catch(e => toast("清空失败：" + e.message));
+}
+
+/* 管理模式删除/恢复的公共入口（供列表按钮调用） */
+function danmuAdminDel(id) {
+  if (!DANMU.admin) { toast("请先进入管理模式"); return; }
+  api("/api/suggestions/delete", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, admin: DANMU.admin }) }).then(r => {
+    if (!r.ok) { toast(r.error || "删除失败"); return; }
+    toast("已删除");
+    refreshSuggestions(true);
+  }).catch(e => toast("删除失败：" + e.message));
+}
+
+function danmuAdminRestore(id) {
+  if (!DANMU.admin) { toast("请先进入管理模式"); return; }
+  api("/api/suggestions/restore", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id, admin: DANMU.admin }) }).then(r => {
+    if (!r.ok) { toast(r.error || "恢复失败"); return; }
+    toast("已恢复为公开可见");
+    refreshSuggestions(true);
+  }).catch(e => toast("恢复失败：" + e.message));
+}
 
 function danmuSend() {
   const text = $("danmu-text").value.trim();
@@ -2302,14 +2391,12 @@ $("danmu-list").addEventListener("click", (e) => {
   }
   const del = e.target.closest("[data-del]");
   if (del) {
-    const code = prompt("请输入管理口令删除这条建议：");
-    if (!code) return;
-    api("/api/suggestions/delete", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: del.dataset.del, admin: code }) }).then(r => {
-      if (!r.ok) { toast(r.error || "删除失败"); return; }
-      toast("已删除");
-      refreshSuggestions(true);
-    }).catch(() => toast("删除失败"));
+    danmuAdminDel(del.dataset.del);
+    return;
+  }
+  const res = e.target.closest("[data-restore]");
+  if (res) {
+    danmuAdminRestore(res.dataset.restore);
     return;
   }
 });

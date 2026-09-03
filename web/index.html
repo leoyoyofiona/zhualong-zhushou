@@ -212,9 +212,16 @@
   <div class="danmu-panel hidden" id="danmu-panel">
     <div class="danmu-head">
       <b>💬 建议弹幕</b>
-      <span class="danmu-sub">公开透明 · 主页弹幕直接飘过</span>
-      <label class="danmu-main-toggle" title="是否在主页面上飘弹幕"><input type="checkbox" id="danmu-main" checked> 主页弹幕</label>
+      <span class="danmu-sub">公开透明 · 顶部轨道循环滚给大家看</span>
+      <label class="danmu-main-toggle" title="是否在最上方轨道显示弹幕"><input type="checkbox" id="danmu-main" checked> 轨道</label>
+      <button id="btn-danmu-admin" class="btn small" title="站密码进入管理：删除/清空/恢复">🔐 管理</button>
       <button id="btn-danmu-close" class="btn small">收起</button>
+    </div>
+    <div class="danmu-adminbar hidden" id="danmu-adminbar">
+      <span class="admin-tag">👑 管理模式</span>
+      <button id="btn-danmu-clear" class="btn small danger" title="清空全部建议(需二次确认)">🗑 清空全部</button>
+      <button id="btn-danmu-admin-exit" class="btn small">退出管理</button>
+      <span class="admin-tip">可删除任意一条、恢复被举报隐藏的、或一键清空。</span>
     </div>
     <div class="danmu-hint">所有人提交的建议会像弹幕一样在主页飘过；这里是全部历史建议（👍=有用，⛔=举报不当内容）。</div>
     <div class="danmu-list" id="danmu-list"><div class="slip-empty">加载中…</div></div>

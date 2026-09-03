@@ -297,6 +297,50 @@ SUG_TEXT_MAX = 300
 SUG_NICK_MAX = 16
 _SUG_CACHE_TTL = 8.0
 
+# 敏感词拦截：内置默认词库 + data/sensitive_words.txt 每行一个可自行增补
+SENSITIVE_FILE = os.path.join(DATA_DIR, "sensitive_words.txt")
+_SENSITIVE_WORDS = [
+    # 人身攻击/辱骂
+    "傻逼", "煞笔", "傻b", "傻比", "你妈", "cnm", "nmsl", "草泥马", "妈的", "贱人", "去死吧",
+    # 涉政/违法红线
+    "法轮", "法轮功", "天安门事件", "六四", "台独", "藏独", "疆独", "港独", "习包子", "维尼",
+    "共匪", "独裁", "游行示威", "推翻", "反党", "法西",
+    # 涉黄
+    "卖淫", "嫖娼", "约炮", "一夜情", "裸聊", "色情", "av种子", "成人片",
+    # 诈骗/广告导流
+    "加微信", "加qq", "加vx", "v信", "私聊", "刷单", "兼职日赚", "彩票内幕", "稳赚不赔",
+    "包中", "内部资料", "代购", "博彩代理", "收徒", "返利", "https://", "http://", "www.",
+    # 赌博引流（非体彩官方渠道）
+    "外围", "滚球盘", "私彩", "六合彩特码", "赌球",
+]
+
+
+def _sensitive_words():
+    words = list(_SENSITIVE_WORDS)
+    try:
+        if os.path.exists(SENSITIVE_FILE):
+            with open(SENSITIVE_FILE, encoding="utf-8") as f:
+                for ln in f:
+                    w = ln.strip()
+                    if w and not w.startswith("#"):
+                        words.append(w)
+    except Exception:  # noqa: BLE001
+        pass
+    return words
+
+
+def _badword(text: str):
+    """返回命中的第一个敏感词，无则 None。"""
+    low = (text or "").lower()
+    for w in _sensitive_words():
+        if w.lower() in low:
+            return w
+    return None
+
+
+def _sug_admin_ok(code: str) -> bool:
+    return bool(code) and code == sug_admin_code()
+
 
 def _sug_load(force: bool = False):
     """读取全部建议(已隐藏的带 hidden 标记返回,由前端过滤)。COS 不可用时抛错。"""
@@ -357,8 +401,18 @@ def sug_add(handler, text: str, nick: str = ""):
     text = (text or "").strip()
     if not text:
         return {"ok": False, "error": "内容不能为空"}
-    text = text[:SUG_TEXT_MAX]
-    nick = (nick or "").strip()[:SUG_NICK_MAX] or "彩友"
+    # 内容过滤：敏感词拦截 + 长度限制（弹幕是公开内容，人人可见，先拦后发）
+    bw = _badword(text)
+    if bw:
+        return {"ok": False, "error": f"内容含敏感词「{bw}」，已拦截。公开弹幕请文明发言。"}
+    bwn = _badword(nick)
+    if bwn:
+        return {"ok": False, "error": f"昵称含敏感词「{bwn}」，换个昵称试试"}
+    if len(text) > SUG_TEXT_MAX:
+        text = text[:SUG_TEXT_MAX]
+    if len(nick) > SUG_NICK_MAX:
+        nick = nick[:SUG_NICK_MAX]
+    nick = nick.strip() or "彩友"
     ip = _client_ip(handler)
     now = time.time()
     with _sug_lock:
@@ -454,6 +508,46 @@ def sug_set_admin(handler, code: str, new_code: str):
     cfg.pop("from_env", None)
     cos_store.save_config(cfg)
     return {"ok": True, "msg": "管理口令已保存"}
+
+
+def sug_admin_login(handler, code: str):
+    """管理入口登录：口令正确返回全量建议（含被举报自动隐藏的），便于管理删除。"""
+    if not _sug_admin_ok(code):
+        return {"ok": False, "error": "站密码不正确"}
+    try:
+        items = _sug_load(force=True)
+        return {"ok": True, "items": _sug_visible(items, is_admin=True)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"读取失败: {e}"}
+
+
+def sug_clear(handler, code: str):
+    """清空全部建议（管理入口，需站密码）。"""
+    if not _sug_admin_ok(code):
+        return {"ok": False, "error": "站密码不正确"}
+    try:
+        _sug_save([])
+        return {"ok": True, "msg": "已清空全部建议"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"清空失败: {e}"}
+
+
+def sug_restore(handler, sid: str, code: str):
+    """恢复被举报自动隐藏的建议（管理入口，需站密码）。"""
+    if not _sug_admin_ok(code):
+        return {"ok": False, "error": "站密码不正确"}
+    try:
+        items = _sug_load(force=True)
+        it = next((x for x in items if x.get("id") == sid), None)
+        if not it:
+            return {"ok": False, "error": "该条不存在或已被删除"}
+        it["hidden"] = False
+        it["reports"] = 0
+        it["report_ips"] = []
+        _sug_save(items)
+        return {"ok": True, "msg": "已恢复该条（重新公开可见）"}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": f"恢复失败: {e}"}
 
 
 # ---------------- HTTP ----------------
@@ -650,6 +744,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json(sug_delete(str(body.get("id", "")), str(body.get("admin", ""))))
         elif p == "/api/suggestions/admin":
             self._json(sug_set_admin(self, str(body.get("code", "")), str(body.get("new", ""))))
+        elif p == "/api/suggestions/login":
+            self._json(sug_admin_login(self, str(body.get("admin", ""))))
+        elif p == "/api/suggestions/clear":
+            self._json(sug_clear(self, str(body.get("admin", ""))))
+        elif p == "/api/suggestions/restore":
+            self._json(sug_restore(self, str(body.get("id", "")), str(body.get("admin", ""))))
         elif p == "/api/llm":
             self._llm(body)
         else:
